@@ -4,21 +4,24 @@ import numpy as np
 from flax import linen as nn
 from NN_class import MLP
 
-
 # Function to plot u_theta
-def plot_u_theta(model, params, M_t=100, M_x=100):
+def plot_u_theta(model, params, M_t=100, M_x=100, t_min=0.0, t_max=1.0, x_min=0.0, x_max=1.0):
     """
-    Plot the neural network function u_theta over [0,1]^2.
+    Plot the neural network function u_theta over a specified domain [t_min, t_max] x [x_min, x_max].
 
     Args:
         model: Flax model instance representing u_theta.
         params: Parameters (pytree) of the neural network.
         M_t: Number of grid points in the t-direction (default: 100).
         M_x: Number of grid points in the x-direction (default: 100).
+        t_min: Minimum value for t (default: 0.0).
+        t_max: Maximum value for t (default: 1.0).
+        x_min: Minimum value for x (default: 0.0).
+        x_max: Maximum value for x (default: 1.0).
     """
-    # Create a grid for t and x
-    t_grid = jnp.linspace(0, 1, M_t)
-    x_grid = jnp.linspace(0, 1, M_x)
+    # Create a grid for t and x over the specified ranges
+    t_grid = jnp.linspace(t_min, t_max, M_t)
+    x_grid = jnp.linspace(x_min, x_max, M_x)
     t, x = jnp.meshgrid(t_grid, x_grid, indexing='ij')  # Shapes: (M_t, M_x)
 
     # Flatten the grid for batch evaluation
@@ -29,7 +32,9 @@ def plot_u_theta(model, params, M_t=100, M_x=100):
     u_values = u_values.reshape(M_t, M_x)  # Reshape to (M_t, M_x)
 
     # Create the plot
-    plt.figure(figsize=(8, 6))
+    height = int((t_max - t_min)*4)
+    width = int((x_max - x_min)*4 + 1)
+    plt.figure(figsize=(width, height))
     plt.pcolormesh(x_grid, t_grid, u_values, shading='nearest', cmap='viridis')
     plt.colorbar(label='$u_\\theta(t, x)$')
     plt.xlabel('x')
