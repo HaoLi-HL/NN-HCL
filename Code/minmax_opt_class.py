@@ -27,10 +27,12 @@ def pytree_l2_norm(pytree):
 class MinMaxOptProb:
     def __init__(self, N_t=10, N_x=10, lr_theta=0.01, hidden_dims=(64, 64, 64), seed=0, sigma=0.1, N_perturb=5000, N_bc=100, N_ic=100,
                  t_min=0, t_max=1, x_min=0, x_max=1, k_h_rf_times=1, u0=None, u1=None, u2=None, lambda_bc_static=0.99, alpha_p_coeffs=0, 
-                 nu=0.001, res_visc=None, res=None):
+                 f_adaptive=1000, nu=0.001, res_visc=None, res=None,):
         self.pwp = PiecewiseLinearPolynomials(N_t, N_x, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, times=k_h_rf_times)
         self.lr_theta = lr_theta
-        self.model = MLP(hidden_dims=hidden_dims, activation=nn.tanh, lb=jnp.array([t_min, x_min]), ub=jnp.array([t_max, x_max]))
+        self.lb = jnp.array([t_min, x_min])
+        self.ub = jnp.array([t_max, x_max])
+        self.model = MLP(hidden_dims=hidden_dims, activation=nn.tanh, lb=self.lb, ub=self.ub)
         key = jax.random.PRNGKey(seed)
         # self.params = self.model.init(key, jnp.ones((1, 2)))
         self.params = self.model.params
@@ -53,6 +55,7 @@ class MinMaxOptProb:
         self.lambda_ic = 1.0
         self.lambda_bc = 1.0
         self.lambda_r = 1.0
+        self.f_adaptive = f_adaptive
         self.alpha = 0.9  # Moving average parameter
         self.alpha_p_coeffs = alpha_p_coeffs # Moving average parameter for k_h
         self.nu = nu
@@ -178,7 +181,7 @@ class MinMaxOptProb:
         total_loss = (lambda_ic * L_ic + 
                       lambda_bc * L_bc + 
                       lambda_r * L_r)
-        return total_loss
+        return total_loss, (L_r, L_ic+L_bc)
         
     def compute_loss_opt_utheta(self, params, p_coeffs):
         # --- Total Loss ---
@@ -202,11 +205,11 @@ class MinMaxOptProb:
 
     def minimize_u_theta_adaptive(self, params, p_coeffs, opt_state_theta, lambda_ic, lambda_bc, lambda_r):
         """Minimize u_theta with adaptive weights."""
-        loss_value, grad_params = jax.value_and_grad(self.compute_loss_opt_utheta_adaptive, argnums=0)(params, p_coeffs, lambda_ic, 
-                                                                                                       lambda_bc, lambda_r)
+        (_, L_all), grad_params = jax.value_and_grad(self.compute_loss_opt_utheta_adaptive, 
+                                                     argnums=0, has_aux=True)(params, p_coeffs, lambda_ic, lambda_bc, lambda_r)
         updates, opt_state_theta = self.opt_theta.update(grad_params, opt_state_theta)
         params = optax.apply_updates(params, updates)
-        return loss_value, params, opt_state_theta
+        return L_all, params, opt_state_theta
 
 
     def pre_train_compute_loss_opt_utheta_int(self, params):
@@ -256,10 +259,10 @@ class MinMaxOptProb:
         return L_all, params, opt_state_theta
 
     def pre_train_step(self, iter):
-        if iter % 1000 == 0:
+        if iter % self.f_adaptive == 0:
             self.update_adaptive_weights(self.params, self.pwp.coeffs, phase='pre-train')
             print(f"Iteration {iter}, lambda_ic: {self.lambda_ic}, lambda_bc: {self.lambda_bc}, lambda_r: {self.lambda_r}.")
-        (loss_int, loss_ibc), self.params, self.opt_state_theta = self.minimize_u(self.params, self.opt_state_theta,
+        (loss_int, loss_ibc), self.params, self.opt_state_theta = self.pre_train_minimize_u(self.params, self.opt_state_theta,
                                                                          self.lambda_ic, self.lambda_bc, self.lambda_r)
         # return self.compute_loss_opt_utheta(self.params)
         return loss_int, loss_ibc
@@ -273,8 +276,8 @@ class MinMaxOptProb:
         self.lambda_r = 1.0
         self.pre_loss_int_history = []
         self.pre_loss_bc_history = []
-        self.minimize_u = jit(self.pre_train_minimize_u_theta_adaptive)
-        # self.minimize_u = self.pre_train_minimize_u_theta
+        self.pre_train_minimize_u = jit(self.pre_train_minimize_u_theta_adaptive)
+        # self.pre_train_minimize_u = self.pre_train_minimize_u_theta
         for iter in range(pre_train_num_iterations):
             loss_int, loss_ibc = self.pre_train_step(iter)
             self.pre_loss_int_history.append(loss_int)
@@ -284,7 +287,7 @@ class MinMaxOptProb:
         end_time = time.perf_counter()
         pre_train_total_time = end_time - start_time
         print(f"Pre-train total time: {pre_train_total_time:.8f} seconds")
-        print(f"Pre-train average time per iteration: {pre_train_total_time / pre_train_num_iterations:.9e} seconds")
+        # print(f"Pre-train average time per iteration: {pre_train_total_time / pre_train_num_iterations:.9e} seconds")
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         if save_loss:
             # Save training loss histories with consistent naming
@@ -348,30 +351,28 @@ class MinMaxOptProb:
         self.lambda_ic = self.alpha * self.lambda_ic + (1 - self.alpha) * hat_lambda_ic
         self.lambda_bc = self.alpha * self.lambda_bc + (1 - self.alpha) * hat_lambda_bc
         self.lambda_r = self.alpha * self.lambda_r + (1 - self.alpha) * hat_lambda_r
-    
 
 
     def train_step(self, iter, moving_avg=True):
-        if iter % 200 == 0:
+        if iter % self.f_adaptive == 0:
             self.update_adaptive_weights(self.params, self.pwp.coeffs, phase='train')
             print(f"Iteration {iter}, lambda_ic: {self.lambda_ic:.8f}, lambda_bc: {self.lambda_bc:.8f}, lambda_r: {self.lambda_r:.8f}.")
-        # First, we minimize u_theta since k_h has been maximized when loading the model.
-        # minimize_u_theta = jit(self.minimize_u_theta)
-        # minimize_u_theta = self.minimize_u_theta
-        # loss_value, self.params, self.opt_state_theta = minimize_u_theta(self.params, self.pwp.coeffs, self.opt_state_theta)
-        minimize_u_theta = jit(self.minimize_u_theta_adaptive)
-        loss_value, self.params, self.opt_state_theta = minimize_u_theta(self.params, self.pwp.coeffs, self.opt_state_theta, 
-                                                                         self.lambda_ic, self.lambda_bc, self.lambda_r)
         
-        if iter % 1 == 0:
+        # First, we maximize k_h.
+        if iter % 10 == 0:
             print(f"Iteration {iter}, before maximize k_h, loss: {self.compute_loss_opt_utheta_int(self.params, self.pwp.coeffs):.8f}, {self.compute_loss_opt_utheta_bc(self.params):.8f}.")
         hat_coeffs, self.key = self.maximize_kh(self.params, self.key)
         # Moving average for self.pwp.coeffs
         self.pwp.coeffs = self.alpha_p_coeffs * self.pwp.coeffs + (1 - self.alpha_p_coeffs) * hat_coeffs
-        if iter % 1 == 0:
+        if iter % 10 == 0:
             print(f"Iteration {iter}, after maximize k_h, loss: {self.compute_loss_opt_utheta_int(self.params, self.pwp.coeffs):.8f}, {self.compute_loss_opt_utheta_bc(self.params):.8f}.")
+
+    
+        # Then we minimize u_theta.
+        (loss_int, loss_ibc), self.params, self.opt_state_theta = self.minimize_u(self.params, self.pwp.coeffs, self.opt_state_theta, 
+                                                                                 self.lambda_ic, self.lambda_bc, self.lambda_r)
         # return self.compute_loss_opt_utheta(self.params)
-        return self.compute_loss_opt_utheta_int(self.params, self.pwp.coeffs), self.compute_loss_opt_utheta_bc(self.params)
+        return loss_int, loss_ibc
 
     def train_process(self, train_num_iterations, save_loss=True, save_model=True):
         print("\nStarting Train Stage")
@@ -383,12 +384,14 @@ class MinMaxOptProb:
         self.loss_bc_history = []
         # Then we maximize k_h
         self.maximize_kh = jit(self.maximize_kh_vec)
+        self.minimize_u = jit(self.minimize_u_theta_adaptive)
         # self.maximize_kh = self.maximize_kh_vec
+        self.pwp.coeffs, self.key = self.maximize_kh(self.params, self.key)
         for iter in range(train_num_iterations):
             loss_int, loss_bc = self.train_step(iter)
             self.loss_int_history.append(loss_int)
             self.loss_bc_history.append(loss_bc)
-            if iter % 10 == 0:
+            if iter % 100 == 0:
                 print(f"Train Iteration {iter}, Loss_int: {loss_int:.8f}, Loss_bc: {loss_bc:.8f}")
         end_time = time.perf_counter()
         train_total_time = (end_time - start_time)
@@ -437,20 +440,22 @@ class MinMaxOptProb:
         loaded_hidden_dims = loaded_data['hidden_dims']
 
         # Recreate the model with the same architecture
-        self.model = MLP(hidden_dims=loaded_hidden_dims)
+        self.model = MLP(hidden_dims=hidden_dims, activation=nn.tanh, lb=self.lb, ub=self.ub)
         
-        # Initialize with a dummy key to set up the structure (params will be overwritten)
-        key = jax.random.PRNGKey(0)  # Any seed; params will be replaced
-        dummy_input = jnp.ones((1, 2))
-        self.params = self.model.init(key, dummy_input)
+        # # Initialize with a dummy key to set up the structure (params will be overwritten)
+        # key = jax.random.PRNGKey(0)  # Any seed; params will be replaced
+        # dummy_input = jnp.ones((1, 2))
+        # self.params = self.model.init(key, dummy_input)
 
         # Assign the loaded parameters
         self.params = loaded_params
+        self.model.params = loaded_params
+        print(f"Model loaded from {model_path} with hidden_dims: {loaded_hidden_dims}")
 
         # Re-initialize optimizer state with loaded params
         self.opt_theta = optax.adam(self.lr_theta)
         self.opt_state_theta = self.opt_theta.init(self.params)
-        print(f"Model loaded from {model_path} with hidden_dims: {loaded_hidden_dims}")
+        
         self.pwp.coeffs, self.key = self.maximize_kh_vec(self.params, self.key)
         loss_int, loss_bc = self.compute_loss_opt_utheta_int(self.params, self.pwp.coeffs), self.compute_loss_opt_utheta_bc(self.params)
         print(f"For the loaded model, Loss_int: {loss_int:.8f}, Loss_bc: {loss_bc:.8f}.")
