@@ -4,6 +4,19 @@ import numpy as np
 from flax import linen as nn
 from NN_class import MLP
 
+
+def plot_loss_history(loss_int, loss_bc, title):
+    plt.figure()
+    plt.plot(loss_int, label='Loss Interior')
+    plt.plot(loss_bc, label='Loss Boundary')
+    plt.xlabel('Iteration')
+    plt.ylabel('Loss (log scale)')
+    plt.yscale('log')
+    plt.grid(True, which="both", ls="--")
+    plt.legend()
+    plt.title(title)
+    plt.show()
+
 # Function to plot u_theta
 def plot_u_theta(model, params, M_t=100, M_x=100, t_min=0.0, t_max=1.0, x_min=0.0, x_max=1.0):
     """
@@ -28,7 +41,8 @@ def plot_u_theta(model, params, M_t=100, M_x=100, t_min=0.0, t_max=1.0, x_min=0.
     tx_points = jnp.stack([t.ravel(), x.ravel()], axis=1)  # Shape: (M_t * M_x, 2)
 
     # Evaluate u_theta on the grid points
-    u_values = model.apply({'params': params}, tx_points)  # Shape: (M_t * M_x, 1)
+    # u_values = model.apply(params, tx_points)  # Shape: (M_t * M_x, 1)
+    u_values = model(params, tx_points)  # Shape: (M_t * M_x, 1)
     u_values = u_values.reshape(M_t, M_x)  # Reshape to (M_t, M_x)
 
     # Create the plot

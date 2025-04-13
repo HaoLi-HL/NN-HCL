@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import jax
 from scipy import sparse
 import time
-from jax import grad
+from jax import grad, hessian, jit, vmap, pmap
 from jax.tree_util import tree_leaves
 from datetime import datetime
 import matplotlib.pyplot as plt
@@ -26,13 +26,14 @@ def pytree_l2_norm(pytree):
 # Optimizer Class
 class MinMaxOptProb:
     def __init__(self, N_t=10, N_x=10, lr_theta=0.01, hidden_dims=(64, 64, 64), seed=0, sigma=0.1, N_perturb=5000, N_bc=100, N_ic=100,
-                 t_min=0, t_max=1, x_min=0, x_max=1, u0=None, u1=None, u2=None, lambda_bc_static=0.99, nu=0.001, alpha_p_coeffs=0, 
-                 res_visc=None, res=None):
-        self.pwp = PiecewiseLinearPolynomials(N_t, N_x)
+                 t_min=0, t_max=1, x_min=0, x_max=1, k_h_rf_times=1, u0=None, u1=None, u2=None, lambda_bc_static=0.99, alpha_p_coeffs=0, 
+                 nu=0.001, res_visc=None, res=None):
+        self.pwp = PiecewiseLinearPolynomials(N_t, N_x, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, times=k_h_rf_times)
         self.lr_theta = lr_theta
-        self.model = MLP(hidden_dims=hidden_dims)
+        self.model = MLP(hidden_dims=hidden_dims, activation=nn.tanh, lb=jnp.array([t_min, x_min]), ub=jnp.array([t_max, x_max]))
         key = jax.random.PRNGKey(seed)
-        self.params = self.model.init(key, jnp.ones((1, 2)))['params']
+        # self.params = self.model.init(key, jnp.ones((1, 2)))
+        self.params = self.model.params
         # Define optimizer
         self.opt_theta = optax.adam(self.lr_theta)
         self.opt_state_theta = self.opt_theta.init(self.params)
@@ -48,19 +49,41 @@ class MinMaxOptProb:
         self.u1 = u1
         self.u2 = u2
         self.lambda_bc_static = lambda_bc_static
-        self.nu = nu
         # Adaptive weights for main training
         self.lambda_ic = 1.0
         self.lambda_bc = 1.0
         self.lambda_r = 1.0
         self.alpha = 0.9  # Moving average parameter
         self.alpha_p_coeffs = alpha_p_coeffs # Moving average parameter for k_h
+        self.nu = nu
         self.res_visc = res_visc
         self.res = res
+        self.gen_ibc()
+        self.gen_derivative()
+
+    def gen_ibc(self):
+         # Initial condition at t_min
+        self.u_t0 = self.u0(self.x_bc)
+        self.tx_t0 = jnp.stack([self.pwp.t_min * jnp.ones_like(self.x_bc), self.x_bc], axis=1)
+
+        # Left Boundary at x_min
+        self.u_x0 = self.u1(self.t_bc)
+        self.tx_x0 = jnp.stack([self.t_bc, self.pwp.x_min * jnp.ones_like(self.t_bc)], axis=1)
+
+        # Right Boundary at x_max
+        self.u_x1 = self.u2(self.t_bc)
+        self.tx_x1 = jnp.stack([self.t_bc, self.pwp.x_max * jnp.ones_like(self.t_bc)], axis=1)
+        
+    def gen_derivative(self):
+        # net_u = lambda params, tx: self.model.apply(params, tx).squeeze()
+        net_u = lambda params, tx: self.model(params, tx).squeeze()
+        self.u_eval = jit(vmap(net_u, in_axes = (None, 0)))
+        self.grad_u = jit(vmap(grad(net_u, argnums=1), in_axes = (None, 0)))
+        self.hessian_u = jit(vmap(hessian(net_u, argnums=1), in_axes = (None, 0)))     
 
     def compute_loss_opt_kh_element(self, tri_idx, p_coeffs_all, params):
         """
-        Compute losses for all perturbations on a single triangle, compatible with jax.vmap.
+        Compute losses for all perturbations on a single triangle, compatible with vmap.
     
         Args:
             tri_idx: Index of the triangle.
@@ -73,9 +96,9 @@ class MinMaxOptProb:
         quad_weights = self.pwp.quad_weights_tri[tri_idx].flatten()  # Shape: (Nq,)
     
         # Evaluate the neural network and its gradients once for the triangle
-        u_quad =self.model.apply({'params': params}, quad_points)  # Shape: (Nq,)
-        grad_u = jax.vmap(jax.grad(lambda tx: self.model.apply({'params': params}, tx).squeeze()))(quad_points)  # Shape: (Nq, 2)
-        u_t, u_x = grad_u[:, 0], grad_u[:, 1]  # Shapes: (Nq,), (Nq,)
+        u_quad = self.u_eval(params, quad_points)
+        grad_u_tx = self.grad_u(params, quad_points)
+        u_t, u_x = grad_u_tx[:, 0], grad_u_tx[:, 1]
     
         # Compute residual (e.g., u_t + u * u_x), fixed for all perturbations
         residual = self.res(u_quad, u_t, u_x).flatten()  # Shape: (Nq,)
@@ -97,24 +120,23 @@ class MinMaxOptProb:
     def maximize_kh_vec(self, params, current_key):
         Nt = self.pwp.N_elements
         vertices_all = self.pwp.triangles  # Shape: (Nt, 3, 2)
-        
         # Evaluate model on all vertices
-        u_values_all = self.model.apply({'params': params}, vertices_all)
+        u_values_all = self.u_eval(params, vertices_all.reshape(-1, 2)).reshape(Nt, 3, -1)
         
         # Compute initial coefficients
         A_all = jnp.stack([jnp.ones((Nt, 3)), vertices_all[:, :, 0], vertices_all[:, :, 1]], axis=-1)
-        initial_coeffs_all = jnp.linalg.solve(A_all, u_values_all[..., None]).squeeze(-1)
+        initial_coeffs_all = jnp.linalg.solve(A_all, u_values_all.reshape(Nt, 3, 1)).squeeze(-1)
         # print(jnp.einsum('ijk,ik->ij', A_all, initial_coeffs_all)-u_values_all)
     
         # Generate perturbations
         key, current_key = jax.random.split(current_key)
         keys = jax.random.split(key, Nt)
-        perturbations_all = jax.vmap(lambda k: self.sigma * jax.random.normal(k, (self.N_perturb, 3)))(keys)
+        perturbations_all = vmap(lambda k: self.sigma * jax.random.normal(k, (self.N_perturb, 3)))(keys)
         perturbed_coeffs_all = initial_coeffs_all[:, None, :] + perturbations_all
         # print(perturbed_coeffs_all.shape)
         # Compute losses (assuming compute_loss_tri is defined)
-        losses_all = jax.vmap(lambda tri_idx, p_coeffs: 
-                              self.compute_loss_opt_kh_element(tri_idx, p_coeffs, params))(jnp.arange(Nt), perturbed_coeffs_all)
+        losses_all = vmap(self.compute_loss_opt_kh_element, in_axes=(0, 0, None))(jnp.arange(Nt), perturbed_coeffs_all, params)
+        
         # print(losses_all.shape)
         # Select best coefficients
         best_indices = jnp.argmax(losses_all, axis=1)
@@ -128,9 +150,9 @@ class MinMaxOptProb:
         quad_weights = self.pwp.quad_weights.flatten()  # Shape: (Nt*Nq,)
     
         # Evaluate neural network and its gradients at quadrature points
-        u_quad = self.model.apply({'params': params}, quad_points)  # Shape: (Nt*Nq,)
-        grad_u = jax.vmap(jax.grad(lambda tx: self.model.apply({'params': params}, tx).squeeze()))(quad_points)  # Shape: (Nt*Nq, 2)
-        u_t, u_x = grad_u[:, 0], grad_u[:, 1]  # Shapes: (Nt*Nq,), (Nt*Nq,)
+        u_quad = self.u_eval(params, quad_points)
+        grad_u_tx = self.grad_u(params, quad_points)
+        u_t, u_x = grad_u_tx[:, 0], grad_u_tx[:, 1]
     
         # Compute the residual (example: u_t + u * u_x for a simple PDE)
         residual = self.res(u_quad, u_t, u_x).flatten()  # Shape: (Nt*Nq,)
@@ -166,7 +188,7 @@ class MinMaxOptProb:
         return total_loss
 
     # def test_u_theta_loss(self, params):
-    #     u_quad = self.model.apply({'params': params}, self.pwp.quad_points)
+    #     u_quad = self.u_eval(params, self.pwp.quad_points)
     #     residual = u_quad - jnp.sin(2*(2*jnp.pi*self.pwp.quad_points[:, 0] + self.pwp.quad_points[:, 1]))
     #     loss = jnp.sum(residual**2 * self.pwp.quad_weights)
     #     return loss
@@ -186,20 +208,17 @@ class MinMaxOptProb:
         params = optax.apply_updates(params, updates)
         return loss_value, params, opt_state_theta
 
+
     def pre_train_compute_loss_opt_utheta_int(self, params):
         # Get quadrature points and weights for this triangle
         quad_points = self.pwp.quad_points  # Shape: (Nt*Nq, 2)
         quad_weights = self.pwp.quad_weights.flatten()  # Shape: (Nt*Nq,)
-    
-        # Evaluate neural network and its gradients at quadrature points
-        u_quad = self.model.apply({'params': params}, quad_points)  # Shape: (Nt*Nq,)
-        grad_u = jax.vmap(jax.grad(lambda tx: self.model.apply({'params': params}, tx).squeeze()))(quad_points)  # Shape: (Nt*Nq, 2)
-        u_t, u_x = grad_u[:, 0], grad_u[:, 1]  # Shapes: (Nt*Nq,), (Nt*Nq,)
-        # Compute Hessian
-        hessian_u = jax.hessian(lambda tx: self.model.apply({'params': params}, tx).squeeze())
-        hessians = jax.vmap(hessian_u)(quad_points)  # Shape: (Nt*Nq, 2, 2)
-        u_xx = hessians[:, 1, 1]  # Shape: (Nt*Nq,), second derivative w.r.t. x
-    
+
+        u_quad = self.u_eval(params, quad_points)
+        grad_u_tx = self.grad_u(params, quad_points)
+        u_t, u_x = grad_u_tx[:, 0], grad_u_tx[:, 1]
+        hessian_u_tx = self.hessian_u(params, quad_points)
+        u_xx = hessian_u_tx[:, 1, 1].flatten()  # Shape: (Nt*Nq,), second derivative w.r.t. x
         # Compute the residual (example: u_t + u * u_x for a simple PDE)
         residual = self.res_visc(u_quad, u_t, u_x, u_xx, self.nu)  # Shape: (Nt*Nq,)
         integrand = residual**2
@@ -219,33 +238,32 @@ class MinMaxOptProb:
         total_loss = (lambda_ic * L_ic + 
                       lambda_bc * L_bc + 
                       lambda_r * L_r)
-        return total_loss
+        return total_loss, (L_r, L_ic+L_bc)
 
-    def pre_train_minimize_u_theta(self, params, opt_state_theta):
-        loss_value, grad_params = jax.value_and_grad(self.pre_train_compute_loss_opt_utheta)(params)
-        # loss_value, grad_params = jax.value_and_grad(self.test_u_theta_loss)(params)
-        updates, opt_state_theta = self.opt_theta.update(grad_params, opt_state_theta)
-        params = optax.apply_updates(params, updates)
-        return loss_value, params, opt_state_theta
+    # def pre_train_minimize_u_theta(self, params, opt_state_theta):
+    #     loss_value, grad_params = jax.value_and_grad(self.pre_train_compute_loss_opt_utheta)(params)
+    #     # loss_value, grad_params = jax.value_and_grad(self.test_u_theta_loss)(params)
+    #     updates, opt_state_theta = self.opt_theta.update(grad_params, opt_state_theta)
+    #     params = optax.apply_updates(params, updates)
+    #     return loss_value, params, opt_state_theta
 
     def pre_train_minimize_u_theta_adaptive(self, params, opt_state_theta, lambda_ic=0, lambda_bc=0, lambda_r=1):
-        loss_value, grad_params = jax.value_and_grad(self.pre_train_compute_loss_opt_utheta_adaptive, argnums=0)(params,
-                                                                                                    lambda_ic, lambda_bc, lambda_r)
-        # loss_value, grad_params = jax.value_and_grad(self.test_u_theta_loss)(params)
+        (_, L_all), grad_params = jax.value_and_grad(self.pre_train_compute_loss_opt_utheta_adaptive, 
+                                                     argnums=0, has_aux=True)(params, lambda_ic, lambda_bc, lambda_r)
+        # loss_val, grad_params = jax.value_and_grad(self.test_u_theta_loss)(params)
         updates, opt_state_theta = self.opt_theta.update(grad_params, opt_state_theta)
         params = optax.apply_updates(params, updates)
-        return loss_value, params, opt_state_theta
+        return L_all, params, opt_state_theta
 
     def pre_train_step(self, iter):
-        if iter % 200 == 0:
+        if iter % 1000 == 0:
             self.update_adaptive_weights(self.params, self.pwp.coeffs, phase='pre-train')
             print(f"Iteration {iter}, lambda_ic: {self.lambda_ic}, lambda_bc: {self.lambda_bc}, lambda_r: {self.lambda_r}.")
-        minimize_u_theta = jax.jit(self.pre_train_minimize_u_theta_adaptive)
-        # pre_train_minimize_u_theta = self.pre_train_minimize_u_theta
-        loss_value, self.params, self.opt_state_theta = minimize_u_theta(self.params, self.opt_state_theta,
+        (loss_int, loss_ibc), self.params, self.opt_state_theta = self.minimize_u(self.params, self.opt_state_theta,
                                                                          self.lambda_ic, self.lambda_bc, self.lambda_r)
         # return self.compute_loss_opt_utheta(self.params)
-        return self.pre_train_compute_loss_opt_utheta_int(self.params), self.compute_loss_opt_utheta_bc(self.params)
+        return loss_int, loss_ibc
+        # return self.pre_train_compute_loss_opt_utheta_int(self.params), self.compute_loss_opt_utheta_bc(self.params)
         
     def pre_train_process(self, pre_train_num_iterations, save_loss=True, save_model=True):
         print("\nStarting Pre-Train Stage")
@@ -255,12 +273,14 @@ class MinMaxOptProb:
         self.lambda_r = 1.0
         self.pre_loss_int_history = []
         self.pre_loss_bc_history = []
+        self.minimize_u = jit(self.pre_train_minimize_u_theta_adaptive)
+        # self.minimize_u = self.pre_train_minimize_u_theta
         for iter in range(pre_train_num_iterations):
-            loss_int, loss_bc = self.pre_train_step(iter)
+            loss_int, loss_ibc = self.pre_train_step(iter)
             self.pre_loss_int_history.append(loss_int)
-            self.pre_loss_bc_history.append(loss_bc)
-            if iter % 10 == 0:
-                print(f"Pre-train Iteration {iter}, Loss_int: {loss_int:.8f}, Loss_bc: {loss_bc:.8f}")
+            self.pre_loss_bc_history.append(loss_ibc)
+            if iter % 200 == 0:
+                print(f"Pre-train Iteration {iter}, Loss_int: {loss_int:.8f}, Loss_ibc: {loss_ibc:.8f}")
         end_time = time.perf_counter()
         pre_train_total_time = end_time - start_time
         print(f"Pre-train total time: {pre_train_total_time:.8f} seconds")
@@ -287,20 +307,16 @@ class MinMaxOptProb:
     def compute_L_ic(self, params):
         """Compute initial condition loss L_ic."""
         # Intial condition at t_min
-        tx_t0 = jnp.stack([self.pwp.t_min * jnp.ones_like(self.x_bc), self.x_bc], axis=1)
-        u_t0 = self.model.apply({'params': params}, tx_t0)
-        return jnp.mean((u_t0 - self.u0(self.x_bc))**2)
+        return jnp.mean((self.u_eval(params, self.tx_t0) - self.u_t0)**2)
 
     def compute_L_bc(self, params):
         """Compute boundary condition loss L_bc."""
         # Left Boundary at x_min
-        tx_x0 = jnp.stack([self.t_bc, self.pwp.x_min * jnp.ones_like(self.t_bc)], axis=1)
-        u_x0 = self.model.apply({'params': params}, tx_x0)
-        bc_x0_loss = jnp.mean((u_x0 - self.u1(self.t_bc))**2)
+        u_x0_nn = self.u_eval(params, self.tx_x0)
+        bc_x0_loss = jnp.mean((u_x0_nn - self.u_x0)**2)
         # Right Boundary at x_max
-        tx_x1 = jnp.stack([self.t_bc, self.pwp.x_max * jnp.ones_like(self.t_bc)], axis=1)
-        u_x1 = self.model.apply({'params': params}, tx_x1)
-        bc_x1_loss = jnp.mean((u_x1 - self.u2(self.t_bc))**2)
+        u_x1_nn = self.u_eval(params, self.tx_x1)
+        bc_x1_loss = jnp.mean((u_x1_nn - self.u_x1)**2)
         return bc_x0_loss + bc_x1_loss
 
     # --- Adaptive Weight Update ---
@@ -310,14 +326,14 @@ class MinMaxOptProb:
         grad_L_ic = grad(self.compute_L_ic)(params)
         grad_L_bc = grad(self.compute_L_bc)(params)
         if phase=='pre-train':
-            grad_L_r = grad(lambda p: self.pre_train_compute_loss_opt_utheta_int(p))(params)
+            grad_L_int = grad(lambda p: self.pre_train_compute_loss_opt_utheta_int(p))(params)
         elif phase=='train':
-            grad_L_r = grad(lambda p: self.compute_loss_opt_utheta_int(p, p_coeffs))(params)
+            grad_L_int = grad(lambda p: self.compute_loss_opt_utheta_int(p, p_coeffs))(params)
 
         # Compute L2 norms
         norm_ic = pytree_l2_norm(grad_L_ic)
         norm_bc = pytree_l2_norm(grad_L_bc)
-        norm_r = pytree_l2_norm(grad_L_r)
+        norm_r = pytree_l2_norm(grad_L_int)
 
         # Sum of norms with epsilon to avoid division by zero
         epsilon = 1e-7
@@ -340,19 +356,16 @@ class MinMaxOptProb:
             self.update_adaptive_weights(self.params, self.pwp.coeffs, phase='train')
             print(f"Iteration {iter}, lambda_ic: {self.lambda_ic:.8f}, lambda_bc: {self.lambda_bc:.8f}, lambda_r: {self.lambda_r:.8f}.")
         # First, we minimize u_theta since k_h has been maximized when loading the model.
-        # minimize_u_theta = jax.jit(self.minimize_u_theta)
+        # minimize_u_theta = jit(self.minimize_u_theta)
         # minimize_u_theta = self.minimize_u_theta
         # loss_value, self.params, self.opt_state_theta = minimize_u_theta(self.params, self.pwp.coeffs, self.opt_state_theta)
-        minimize_u_theta = jax.jit(self.minimize_u_theta_adaptive)
+        minimize_u_theta = jit(self.minimize_u_theta_adaptive)
         loss_value, self.params, self.opt_state_theta = minimize_u_theta(self.params, self.pwp.coeffs, self.opt_state_theta, 
                                                                          self.lambda_ic, self.lambda_bc, self.lambda_r)
         
-        # Then we maximize k_h
-        maximize_kh_vec = jax.jit(self.maximize_kh_vec)
-        # maximize_kh_vec = self.maximize_kh_vec
         if iter % 1 == 0:
             print(f"Iteration {iter}, before maximize k_h, loss: {self.compute_loss_opt_utheta_int(self.params, self.pwp.coeffs):.8f}, {self.compute_loss_opt_utheta_bc(self.params):.8f}.")
-        hat_coeffs, self.key = maximize_kh_vec(self.params, self.key)
+        hat_coeffs, self.key = self.maximize_kh(self.params, self.key)
         # Moving average for self.pwp.coeffs
         self.pwp.coeffs = self.alpha_p_coeffs * self.pwp.coeffs + (1 - self.alpha_p_coeffs) * hat_coeffs
         if iter % 1 == 0:
@@ -368,6 +381,9 @@ class MinMaxOptProb:
         self.lambda_r = 1.0
         self.loss_int_history = []
         self.loss_bc_history = []
+        # Then we maximize k_h
+        self.maximize_kh = jit(self.maximize_kh_vec)
+        # self.maximize_kh = self.maximize_kh_vec
         for iter in range(train_num_iterations):
             loss_int, loss_bc = self.train_step(iter)
             self.loss_int_history.append(loss_int)
@@ -426,7 +442,7 @@ class MinMaxOptProb:
         # Initialize with a dummy key to set up the structure (params will be overwritten)
         key = jax.random.PRNGKey(0)  # Any seed; params will be replaced
         dummy_input = jnp.ones((1, 2))
-        self.params = self.model.init(key, dummy_input)['params']
+        self.params = self.model.init(key, dummy_input)
 
         # Assign the loaded parameters
         self.params = loaded_params
