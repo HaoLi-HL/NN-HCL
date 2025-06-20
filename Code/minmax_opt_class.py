@@ -26,14 +26,14 @@ def pytree_l2_norm(pytree):
 # Optimizer Class
 class MinMaxOptProb:
     def __init__(self, N_t=10, N_x=10, lr_theta=0.01, hidden_dims=(64, 64, 64), seed=0, sigma=0.1, N_perturb=5000, N_bc=100, N_ic=100,
-                 t_min=0, t_max=1, x_min=0, x_max=1, k_h_rf_times=1, u0=None, u1=None, u2=None, lambda_bc_static=0.99, alpha_p_coeffs=0, 
-                 f_adaptive=1000, nu=0.001, res_visc=None, res=None,):
+                 t_min=0, t_max=1, x_min=0, x_max=1, k_h_rf_times=1, u0=None, u1=None, u2=None, lambda_bc_static=0.9, alpha_p_coeffs=0, 
+                 f_adaptive=1000, nu=0.001, res_visc=None, res=None, use_loss_elem_int=True):
         self.pwp = PiecewiseLinearPolynomials(N_t, N_x, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, times=k_h_rf_times)
         self.lr_theta = lr_theta
         self.lb = jnp.array([t_min, x_min])
         self.ub = jnp.array([t_max, x_max])
+        self.h = (x_max - x_min)/N_x
         self.model = MLP(hidden_dims=hidden_dims, activation=nn.tanh, lb=self.lb, ub=self.ub)
-        key = jax.random.PRNGKey(seed)
         # self.params = self.model.init(key, jnp.ones((1, 2)))
         self.params = self.model.params
         # Define optimizer
@@ -63,6 +63,20 @@ class MinMaxOptProb:
         self.res = res
         self.gen_ibc()
         self.gen_derivative()
+        if use_loss_elem_int:
+            self.compute_loss_eqn_opt_utheta = self.compute_loss_elem_int_opt_utheta
+        else:
+            self.compute_loss_eqn_opt_utheta = self.compute_loss_elem_bdry_opt_utheta
+    
+    def set_params(self, new_params):
+        """
+        Set the model parameters and reinitialize the optimizer state.
+
+        Args:
+            new_params: The parameters to copy into this model instance.
+        """
+        self.params = new_params
+        self.opt_state_theta = self.opt_theta.init(self.params)
 
     def gen_ibc(self):
          # Initial condition at t_min
@@ -147,7 +161,7 @@ class MinMaxOptProb:
         # print(f"The max. of optimized coef. for k_h: {jnp.max(jnp.linalg.norm(best_coeffs_all[:,1:]))}")
         return best_coeffs_all, current_key
 
-    def compute_loss_opt_utheta_int(self, params, p_coeffs):
+    def compute_loss_elem_int_opt_utheta(self, params, p_coeffs):
         # Get quadrature points and weights for this triangle
         quad_points = self.pwp.quad_points  # Shape: (Nt*Nq, 2)
         quad_weights = self.pwp.quad_weights.flatten()  # Shape: (Nt*Nq,)
@@ -156,6 +170,11 @@ class MinMaxOptProb:
         u_quad = self.u_eval(params, quad_points)
         grad_u_tx = self.grad_u(params, quad_points)
         u_t, u_x = grad_u_tx[:, 0], grad_u_tx[:, 1]
+
+        hessian_u_tx = self.hessian_u(params, quad_points)
+        u_xx = hessian_u_tx[:, 1, 1].flatten()  # Shape: (Nt*Nq,), second derivative w.r.t. x
+        # Compute the residual with viscous term (example: u_t + u * u_x for a simple PDE)
+        residual_visc = self.res_visc(u_quad, u_t, u_x, u_xx, self.h**2)  # Shape: (Nt*Nq,)
     
         # Compute the residual (example: u_t + u * u_x for a simple PDE)
         residual = self.res(u_quad, u_t, u_x).flatten()  # Shape: (Nt*Nq,)
@@ -166,18 +185,82 @@ class MinMaxOptProb:
         k_h_quad = p_coeffs_quad[:, 0] + p_coeffs_quad[:, 1] * quad_points[:, 0] + p_coeffs_quad[:, 2] * quad_points[:, 1]  # Shape: (Nt*Nq,)
 
         # Define the integrand for the loss (residual * sign(u - k_h))
-        integrand = residual * jnp.sign(u_quad - k_h_quad)  # Shape: (Nt*Nq,)
+        integrand = residual * jnp.sign(u_quad - k_h_quad) + jnp.abs(self.h*residual_visc)  # Shape: (Nt*Nq,)
         interior_loss = jnp.dot(quad_weights, integrand)  # Scalar
         return interior_loss
+    
+    def compute_loss_elem_bdry_opt_utheta(self, params, p_coeffs):
+        """Compute the new loss function with boundary and interior integrals."""
+        # Define the flux function and its derivative (e.g., for Burgers' equation)
+        def f(u):
+            return u**2 / 2
         
-    def compute_loss_opt_utheta_bc(self, params):
+        def df_du(u):
+            return u
+
+        # --- Interior Integral ---
+        quad_points = self.pwp.quad_points  # Shape: (Nt*Nq, 2)
+        quad_weights = self.pwp.quad_weights.flatten()  # Shape: (Nt*Nq,)
+        u_quad = self.u_eval(params, quad_points)  # Shape: (Nt*Nq,)
+        
+        # Compute k_h and its derivatives at quadrature points
+        p_coeffs_all = p_coeffs[self.pwp.element_indices]  # Shape: (Nt*Nq, 3)
+        k_h_quad = (p_coeffs_all[:, 0] + 
+                    p_coeffs_all[:, 1] * quad_points[:, 0] + 
+                    p_coeffs_all[:, 2] * quad_points[:, 1])  # Shape: (Nt*Nq,)
+        b_K = p_coeffs_all[:, 1]  # \partial_t k_h, Shape: (Nt*Nq,)
+        c_K = p_coeffs_all[:, 2]  # \partial_x k_h, Shape: (Nt*Nq,)
+        
+        # Compute the residual: \partial_t k_h + \partial_x f(k_h)
+        residual_kh = b_K + df_du(k_h_quad) * c_K  # Shape: (Nt*Nq,)
+        sgn = jnp.sign(u_quad - k_h_quad)  # Shape: (Nt*Nq,)
+        integrand_int = residual_kh * sgn  # Shape: (Nt*Nq,)
+        interior_loss = jnp.dot(quad_weights, integrand_int)  # Scalar
+
+        # --- Boundary Integral ---
+        N_points_per_edge = 2**self.pwp.bdry_times + 1
+        # Reshape boundary data for vectorization
+        points_per_edge = self.pwp.bdry_points_tri.reshape(self.pwp.N_elements, 3, N_points_per_edge, 2)  # Shape: (N_elements, 3, N_pts, 2)
+        weights_per_edge = self.pwp.bdry_weights_tri.reshape(self.pwp.N_elements, 3, N_points_per_edge)  # Shape: (N_elements, 3, N_pts)
+        normals_per_edge = self.pwp.normals  # Shape: (N_elements, 3, 2)
+
+        def compute_edge_integral(points, weights, normal, p_coeffs_K, params):
+            """Compute boundary integral for one edge."""
+            # points: Shape (N_points_per_edge, 2)
+            u_theta = self.u_eval(params, points)  # Shape: (N_points_per_edge,)
+            k_h = (p_coeffs_K[0] + 
+                   p_coeffs_K[1] * points[:, 0] + 
+                   p_coeffs_K[2] * points[:, 1])  # Shape: (N_points_per_edge,)
+            sgn = jnp.sign(u_theta - k_h)  # Shape: (N_points_per_edge,)
+            f_u = f(u_theta)  # Shape: (N_points_per_edge,)
+            f_k = f(k_h)  # Shape: (N_points_per_edge,)
+            flux_diff = ((u_theta - k_h) * normal[0] + 
+                        (f_u - f_k) * normal[1])  # Shape: (N_points_per_edge,)
+            integrand = flux_diff * sgn  # Shape: (N_points_per_edge,)
+            return jnp.sum(weights * integrand)  # Scalar
+
+        # Vectorize over edges for a single triangle
+        def compute_triangle_boundary_loss(points_tri, weights_tri, normals_tri, p_coeffs_K, params):
+            edge_losses = vmap(compute_edge_integral, in_axes=(0, 0, 0, None, None))(
+                points_tri, weights_tri, normals_tri, p_coeffs_K, params)  # Shape: (3,)
+            return jnp.sum(edge_losses)  # Scalar
+
+        # Vectorize over all triangles
+        boundary_loss = jnp.sum(vmap(compute_triangle_boundary_loss, in_axes=(0, 0, 0, 0, None))(
+                                points_per_edge, weights_per_edge, normals_per_edge, p_coeffs, params))  # Scalar
+
+        # Total loss
+        total_loss = interior_loss + boundary_loss
+        return total_loss
+        
+    def compute_loss_bc_opt_utheta(self, params):
         return self.compute_L_ic(params) + self.compute_L_bc(params)
 
     def compute_loss_opt_utheta_adaptive(self, params, p_coeffs, lambda_ic, lambda_bc, lambda_r):
         """Compute total loss with adaptive weights."""
         L_ic = self.compute_L_ic(params)
         L_bc = self.compute_L_bc(params)
-        L_r = self.compute_loss_opt_utheta_int(params, p_coeffs)
+        L_r = self.compute_loss_eqn_opt_utheta(params, p_coeffs)
         total_loss = (lambda_ic * L_ic + 
                       lambda_bc * L_bc + 
                       lambda_r * L_r)
@@ -185,8 +268,8 @@ class MinMaxOptProb:
         
     def compute_loss_opt_utheta(self, params, p_coeffs):
         # --- Total Loss ---
-        interior_loss = self.compute_loss_opt_utheta_int(params, p_coeffs)
-        boundary_loss = self.compute_loss_opt_utheta_bc(params)
+        interior_loss = self.compute_loss_eqn_opt_utheta(params, p_coeffs)
+        boundary_loss = self.compute_loss_bc_opt_utheta(params)
         total_loss = (1-self.lambda_bc_static) * interior_loss + self.lambda_bc_static * boundary_loss
         return total_loss
 
@@ -230,7 +313,7 @@ class MinMaxOptProb:
 
     # def pre_train_compute_loss_opt_utheta(self, params):
     #     interior_loss = self.pre_train_compute_loss_opt_utheta_int(params)
-    #     boundary_loss = self.compute_loss_opt_utheta_bc(params)
+    #     boundary_loss = self.compute_loss_bc_opt_utheta(params)
     #     total_loss = (1-self.lambda_bc_static) * interior_loss + self.lambda_bc_static * boundary_loss
     #     return total_loss
 
@@ -262,28 +345,27 @@ class MinMaxOptProb:
         if iter % self.f_adaptive == 0:
             self.update_adaptive_weights(self.params, self.pwp.coeffs, phase='pre-train')
             print(f"Iteration {iter}, lambda_ic: {self.lambda_ic}, lambda_bc: {self.lambda_bc}, lambda_r: {self.lambda_r}.")
-        (loss_int, loss_ibc), self.params, self.opt_state_theta = self.pre_train_minimize_u(self.params, self.opt_state_theta,
+        (loss_eqn, loss_ibc), self.params, self.opt_state_theta = self.pre_train_minimize_u(self.params, self.opt_state_theta,
                                                                          self.lambda_ic, self.lambda_bc, self.lambda_r)
-        # return self.compute_loss_opt_utheta(self.params)
-        return loss_int, loss_ibc
-        # return self.pre_train_compute_loss_opt_utheta_int(self.params), self.compute_loss_opt_utheta_bc(self.params)
+        return loss_eqn, loss_ibc
+        # return self.pre_train_compute_loss_opt_utheta_int(self.params), self.compute_loss_bc_opt_utheta(self.params)
         
     def pre_train_process(self, pre_train_num_iterations, save_loss=True, save_model=True):
         print("\nStarting Pre-Train Stage")
         start_time = time.perf_counter()
-        self.lambda_ic = 1.0
-        self.lambda_bc = 1.0
+        self.lambda_ic = 10.0
+        self.lambda_bc = 10.0
         self.lambda_r = 1.0
-        self.pre_loss_int_history = []
+        self.pre_loss_eqn_history = []
         self.pre_loss_bc_history = []
         self.pre_train_minimize_u = jit(self.pre_train_minimize_u_theta_adaptive)
         # self.pre_train_minimize_u = self.pre_train_minimize_u_theta
         for iter in range(pre_train_num_iterations):
-            loss_int, loss_ibc = self.pre_train_step(iter)
-            self.pre_loss_int_history.append(loss_int)
+            loss_eqn, loss_ibc = self.pre_train_step(iter)
+            self.pre_loss_eqn_history.append(loss_eqn)
             self.pre_loss_bc_history.append(loss_ibc)
             if iter % 200 == 0:
-                print(f"Pre-train Iteration {iter}, Loss_int: {loss_int:.8f}, Loss_ibc: {loss_ibc:.8f}")
+                print(f"Pre-train Iteration {iter}, loss_eqn: {loss_eqn:.8f}, Loss_ibc: {loss_ibc:.8f}")
         end_time = time.perf_counter()
         pre_train_total_time = end_time - start_time
         print(f"Pre-train total time: {pre_train_total_time:.8f} seconds")
@@ -291,13 +373,13 @@ class MinMaxOptProb:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         if save_loss:
             # Save training loss histories with consistent naming
-            loss_int_path = os.path.join('..', 'data', f'pre_train_loss_int_history_{timestamp}.pkl')
-            with open(loss_int_path, 'wb') as f:
-                pickle.dump(self.pre_loss_int_history, f)
+            loss_eqn_path = os.path.join('..', 'data', f'pre_train_loss_eqn_history_{timestamp}.pkl')
+            with open(loss_eqn_path, 'wb') as f:
+                pickle.dump(self.pre_loss_eqn_history, f)
             loss_bc_path = os.path.join('..', 'data', f'pre_train_loss_bc_history_{timestamp}.pkl')
             with open(loss_bc_path, 'wb') as f:
                 pickle.dump(self.pre_loss_bc_history, f)
-            print(f"Pre-train loss histories saved to {loss_int_path} and {loss_bc_path}")
+            print(f"Pre-train loss histories saved to {loss_eqn_path} and {loss_bc_path}")
         
         if save_model:
             # Save both params and architecture info
@@ -331,7 +413,7 @@ class MinMaxOptProb:
         if phase=='pre-train':
             grad_L_int = grad(lambda p: self.pre_train_compute_loss_opt_utheta_int(p))(params)
         elif phase=='train':
-            grad_L_int = grad(lambda p: self.compute_loss_opt_utheta_int(p, p_coeffs))(params)
+            grad_L_int = grad(lambda p: self.compute_loss_eqn_opt_utheta(p, p_coeffs))(params)
 
         # Compute L2 norms
         norm_ic = pytree_l2_norm(grad_L_ic)
@@ -360,27 +442,26 @@ class MinMaxOptProb:
         
         # First, we maximize k_h.
         if iter % 10 == 0:
-            print(f"Iteration {iter}, before maximize k_h, loss: {self.compute_loss_opt_utheta_int(self.params, self.pwp.coeffs):.8f}, {self.compute_loss_opt_utheta_bc(self.params):.8f}.")
+            print(f"Iteration {iter}, before maximize k_h, loss: {self.compute_loss_eqn_opt_utheta(self.params, self.pwp.coeffs):.8f}, {self.compute_loss_bc_opt_utheta(self.params):.8f}.")
         hat_coeffs, self.key = self.maximize_kh(self.params, self.key)
         # Moving average for self.pwp.coeffs
         self.pwp.coeffs = self.alpha_p_coeffs * self.pwp.coeffs + (1 - self.alpha_p_coeffs) * hat_coeffs
         if iter % 10 == 0:
-            print(f"Iteration {iter}, after maximize k_h, loss: {self.compute_loss_opt_utheta_int(self.params, self.pwp.coeffs):.8f}, {self.compute_loss_opt_utheta_bc(self.params):.8f}.")
+            print(f"Iteration {iter}, after maximize k_h, loss: {self.compute_loss_eqn_opt_utheta(self.params, self.pwp.coeffs):.8f}, {self.compute_loss_bc_opt_utheta(self.params):.8f}.")
 
     
         # Then we minimize u_theta.
-        (loss_int, loss_ibc), self.params, self.opt_state_theta = self.minimize_u(self.params, self.pwp.coeffs, self.opt_state_theta, 
+        (loss_eqn, loss_ibc), self.params, self.opt_state_theta = self.minimize_u(self.params, self.pwp.coeffs, self.opt_state_theta, 
                                                                                  self.lambda_ic, self.lambda_bc, self.lambda_r)
-        # return self.compute_loss_opt_utheta(self.params)
-        return loss_int, loss_ibc
+        return loss_eqn, loss_ibc
 
     def train_process(self, train_num_iterations, save_loss=True, save_model=True):
         print("\nStarting Train Stage")
         start_time = time.perf_counter()
-        self.lambda_ic = 1.0
-        self.lambda_bc = 1.0
+        self.lambda_ic = 10.0
+        self.lambda_bc = 10.0
         self.lambda_r = 1.0
-        self.loss_int_history = []
+        self.loss_eqn_history = []
         self.loss_bc_history = []
         # Then we maximize k_h
         self.maximize_kh = jit(self.maximize_kh_vec)
@@ -388,11 +469,11 @@ class MinMaxOptProb:
         # self.maximize_kh = self.maximize_kh_vec
         self.pwp.coeffs, self.key = self.maximize_kh(self.params, self.key)
         for iter in range(train_num_iterations):
-            loss_int, loss_bc = self.train_step(iter)
-            self.loss_int_history.append(loss_int)
+            loss_eqn, loss_bc = self.train_step(iter)
+            self.loss_eqn_history.append(loss_eqn)
             self.loss_bc_history.append(loss_bc)
             if iter % 100 == 0:
-                print(f"Train Iteration {iter}, Loss_int: {loss_int:.8f}, Loss_bc: {loss_bc:.8f}")
+                print(f"Train Iteration {iter}, loss_eqn: {loss_eqn:.8f}, Loss_bc: {loss_bc:.8f}")
         end_time = time.perf_counter()
         train_total_time = (end_time - start_time)
         print(f"Train total time: {train_total_time:.8f} seconds")
@@ -400,13 +481,13 @@ class MinMaxOptProb:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         if save_loss:
             # Save training loss histories with consistent naming
-            loss_int_path = os.path.join('..', 'data', f'loss_int_history_{timestamp}.pkl')
-            with open(loss_int_path, 'wb') as f:
-                pickle.dump(self.loss_int_history, f)
+            loss_eqn_path = os.path.join('..', 'data', f'loss_eqn_history_{timestamp}.pkl')
+            with open(loss_eqn_path, 'wb') as f:
+                pickle.dump(self.loss_eqn_history, f)
             loss_bc_path = os.path.join('..', 'data', f'loss_bc_history_{timestamp}.pkl')
             with open(loss_bc_path, 'wb') as f:
                 pickle.dump(self.loss_bc_history, f)
-            print(f"Loss histories saved to {loss_int_path} and {loss_bc_path}")
+            print(f"Loss histories saved to {loss_eqn_path} and {loss_bc_path}")
         
         if save_model:
             # Save both params and architecture info
@@ -457,5 +538,5 @@ class MinMaxOptProb:
         self.opt_state_theta = self.opt_theta.init(self.params)
         
         self.pwp.coeffs, self.key = self.maximize_kh_vec(self.params, self.key)
-        loss_int, loss_bc = self.compute_loss_opt_utheta_int(self.params, self.pwp.coeffs), self.compute_loss_opt_utheta_bc(self.params)
-        print(f"For the loaded model, Loss_int: {loss_int:.8f}, Loss_bc: {loss_bc:.8f}.")
+        loss_eqn, loss_bc = self.compute_loss_eqn_opt_utheta(self.params, self.pwp.coeffs), self.compute_loss_bc_opt_utheta(self.params)
+        print(f"For the loaded model, loss_eqn: {loss_eqn:.8f}, Loss_bc: {loss_bc:.8f}.")
