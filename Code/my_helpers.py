@@ -46,8 +46,8 @@ def plot_u_theta(model, params, M_t=100, M_x=100, t_min=0.0, t_max=1.0, x_min=0.
     u_values = u_values.reshape(M_t, M_x)  # Reshape to (M_t, M_x)
 
     # Create the plot
-    height = int((t_max - t_min)*4)
-    width = int((x_max - x_min)*4 + 1)
+    height = (t_max - t_min)*4
+    width = (x_max - x_min)*4 + 1
     plt.figure(figsize=(width, height))
     plt.pcolormesh(x_grid, t_grid, u_values, shading='nearest', cmap='viridis')
     plt.colorbar(label='$u_\\theta(t, x)$')

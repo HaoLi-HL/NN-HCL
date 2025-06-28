@@ -10,7 +10,7 @@ from NN_class import MLP
 
 
 class PiecewiseLinearPolynomials:
-    def __init__(self, N_t, N_x, t_min=0.0, t_max=1.0, x_min=0.0, x_max=1.0, times=1):
+    def __init__(self, N_t, N_x, t_min=0.0, t_max=1.0, x_min=0.0, x_max=1.0, times=1, bdry_times=1):
         """
         Initialize piecewise linear polynomials on a triangular mesh with custom ranges.
 
@@ -30,10 +30,13 @@ class PiecewiseLinearPolynomials:
         self.x_min = x_min
         self.x_max = x_max
         self.times = times
+        self.bdry_times = bdry_times
         self.N_elements = 2 * N_t * N_x  # Two triangles per rectangle
         self.triangles = self._generate_triangles()
         self.coeffs = jnp.zeros((self.N_elements, 3))  # Coefficients for each triangle
         self.quad_points, self.quad_weights, self.element_indices, self.quad_points_tri, self.quad_weights_tri = self._setup_quadrature()
+        self.bdry_points_tri, self.bdry_weights_tri = self.get_boundary_quadrature()
+        self.normals = self.compute_normals()
 
     def _generate_triangles(self):
         """Generate the original triangles for the mesh with custom ranges."""
@@ -138,3 +141,63 @@ class PiecewiseLinearPolynomials:
         return (self.coeffs[element_indices, 0] +
                 self.coeffs[element_indices, 1] * tx_points[:, 0] +
                 self.coeffs[element_indices, 2] * tx_points[:, 1])
+
+    def get_boundary_quadrature(self):
+        """
+        Generate composite trapezoid rule quadrature points and weights for the boundary of each triangle.
+
+        Returns:
+            bdry_points_tri: Quadrature points for the boundaries, shape (N_elements, 3*(2**bdry_times + 1), 2).
+            bdry_weights_tri: Quadrature weights for the boundaries, shape (N_elements, 3*(2**bdry_times + 1)).
+        """
+        bdry_times = self.bdry_times
+        n = 2 ** bdry_times  # Number of subintervals per edge
+        def _edge_quadrature(v1, v2):
+            """
+            Compute quadrature points and weights for a single edge using the composite trapezoid rule.
+
+            Args:
+                v1: Starting vertex of the edge, shape (2,).
+                v2: Ending vertex of the edge, shape (2,).
+
+            Returns:
+                points: Quadrature points along the edge, shape (n+1, 2).
+                weights: Quadrature weights for the points, shape (n+1,).
+            """
+            L = jnp.linalg.norm(v2 - v1)  # Edge length
+            t = jnp.linspace(0, 1, n + 1)  # Parameter values from 0 to 1
+            points = v1 + t[:, None] * (v2 - v1)  # Linearly spaced points along the edge
+            weights = jnp.full((n + 1,), L / n)  # Interior weights
+            weights = weights.at[0].set(L / (2 * n))  # Endpoint weight (start)
+            weights = weights.at[-1].set(L / (2 * n))  # Endpoint weight (end)
+            return points, weights
+
+        # Vectorize the edge quadrature function over multiple edges
+        edge_quadrature_vmap = vmap(_edge_quadrature, in_axes=(0, 0))
+
+        # Compute quadrature for each set of edges for all triangles
+        points1, weights1 = edge_quadrature_vmap(self.triangles[:, 0], self.triangles[:, 1])  # Edge 0-1
+        points2, weights2 = edge_quadrature_vmap(self.triangles[:, 1], self.triangles[:, 2])  # Edge 1-2
+        points3, weights3 = edge_quadrature_vmap(self.triangles[:, 2], self.triangles[:, 0])  # Edge 2-0
+
+        # Concatenate points and weights for all three edges per triangle
+        bdry_points_tri = jnp.concatenate([points1, points2, points3], axis=1)  # Shape: (N_elements, 3*(n+1), 2)
+        bdry_weights_tri = jnp.concatenate([weights1, weights2, weights3], axis=1)  # Shape: (N_elements, 3*(n+1))
+
+        return bdry_points_tri, bdry_weights_tri
+
+    
+    def compute_normals(self):
+        """Compute outward unit normals for each edge of each triangle."""
+        triangles = self.triangles
+        v0, v1, v2 = triangles[:, 0], triangles[:, 1], triangles[:, 2]
+        # Edge 0-1
+        tangent01 = v1 - v0
+        normal01 = jnp.stack([-tangent01[:, 1], tangent01[:, 0]], axis=1) / jnp.linalg.norm(tangent01, axis=1, keepdims=True)
+        # Edge 1-2
+        tangent12 = v2 - v1
+        normal12 = jnp.stack([-tangent12[:, 1], tangent12[:, 0]], axis=1) / jnp.linalg.norm(tangent12, axis=1, keepdims=True)
+        # Edge 2-0
+        tangent20 = v0 - v2
+        normal20 = jnp.stack([-tangent20[:, 1], tangent20[:, 0]], axis=1) / jnp.linalg.norm(tangent20, axis=1, keepdims=True)
+        return jnp.stack([normal01, normal12, normal20], axis=1)  # Shape: (N_elements, 3, 2)

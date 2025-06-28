@@ -50,7 +50,7 @@ class MLP:
         xavier_stddev = jnp.sqrt(2 / (in_dim + out_dim))
         return random.truncated_normal(key, -2, 2, shape=(out_dim, in_dim), dtype=jnp.float32) * xavier_stddev
 
-    def forward(self, params, x, extra_op=False):
+    def forward(self, params, x, extra_output=False):
         """
         Compute the forward pass of the MLP.
 
@@ -74,7 +74,7 @@ class MLP:
         y = jnp.dot(x, W.T) + b
         out_wo_layer = x
         out = jnp.squeeze(y)
-        if extra_op:
+        if extra_output:
             return out, out_wo_layer
         else:
             return out
@@ -142,7 +142,7 @@ class MG_NN:
         temp = x
         sum_out = 0
         for mlp in self.mlps:
-            out, out_wo_layer = mlp.forward(mlp.params, temp, extra_op=True)
+            out, out_wo_layer = mlp.forward(mlp.params, temp, extra_output=True)
             sum_out += out
             temp = out_wo_layer
         return sum_out
