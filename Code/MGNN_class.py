@@ -151,7 +151,7 @@ class MG_NN:
         temp = x
         sum_out = 0
         for i, params in enumerate(params_list):
-            mlp = self.model.mlps[i]
+            mlp = self.mlps[i]
             out, out_wo_layer = mlp.forward(params, temp, extra_output=True)
             sum_out += out
             temp = out_wo_layer

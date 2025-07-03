@@ -1,0 +1,22 @@
+{
+  "os": "Windows-10-10.0.22621-SP0",
+  "python": "CPython 3.10.18",
+  "startedAt": "2025-07-03T10:49:48.747295Z",
+  "program": "NN-HCL/Code/mg_pinn_test.ipynb",
+  "email": "lihao199408@gmail.com",
+  "root": "C:\\Users\\hao6li\\Projects\\NN-HCL\\Code",
+  "host": "IT-23-0001399",
+  "executable": "D:\\minconda\\envs\\jax-env\\python.exe",
+  "cpu_count": 16,
+  "cpu_count_logical": 24,
+  "disk": {
+    "/": {
+      "total": "2046951419904",
+      "used": "123568250880"
+    }
+  },
+  "memory": {
+    "total": "137097900032"
+  },
+  "writerId": "en82jbz8ra1y9aw0f5tzdaqztrc532y4"
+}

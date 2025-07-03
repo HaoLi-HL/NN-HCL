@@ -230,10 +230,10 @@ class MinMaxOptProb:
         params = optax.apply_updates(params, updates)
         return L_all, params, opt_state
 
-    def pre_train_loss_fn(self, params, grade_idx, iter):
+    def pre_train_loss_fn_stage1(self, params, grade_idx):
         """Loss function for first stage of MGDL pre-training."""
-        params_list = [self.mg_nn.mlps[j].params for j in range(grade_idx)] + [params]
-        u_eval = lambda X: self.mg_nn.forward_with_params(params_list, X)
+        params_list = [self.model.mlps[j].params for j in range(grade_idx)] + [params]
+        u_eval = lambda X: self.model.forward_with_params(params_list, X)
         # IC loss
         L_ic = jnp.mean((u_eval(self.tx_t0) - self.u_t0)**2)
         # BC loss
@@ -253,12 +253,12 @@ class MinMaxOptProb:
         return total_loss, (L_r, L_ic + L_bc)
 
 
-    def pre_train_loss_fn_stage2(self, params_last_k, grade_idx, iter):
+    def pre_train_loss_fn_stage2(self, params_last_k):
         """Loss function for second stage of MGDL pre-training."""
-        n = len(self.mg_nn.mlps)
-        fixed_params = [self.mg_nn.mlps[i].params for i in range(n - self.k)]
+        n = len(self.model.mlps)
+        fixed_params = [self.model.mlps[i].params for i in range(n - self.k)]
         params_list = fixed_params + list(params_last_k)
-        u_eval = lambda X: self.mg_nn.forward_with_params(params_list, X)
+        u_eval = lambda X: self.model.forward_with_params(params_list, X)
         # IC loss
         L_ic = jnp.mean((u_eval(self.tx_t0) - self.u_t0)**2)
         # BC loss
@@ -302,9 +302,9 @@ class MinMaxOptProb:
             for iter in range(self.grade_epochs[grade_idx]):
                 if iter % self.f_adaptive == 0:
                     self.update_adaptive_weights(params=params, phase='pre-train', grade_idx=grade_idx)
-                    print(f"Grade {grade_idx}, Iteration {iter}, lambda_ic: {self.lambda_ic:.8f}, lambda_bc: {self.lambda_bc:.8f}, lambda_r: {self.lambda_r:.8f}")
+                    print(f"Grade {grade_idx}, Epoch {iter}, lambda_ic: {self.lambda_ic:.8f}, lambda_bc: {self.lambda_bc:.8f}, lambda_r: {self.lambda_r:.8f}")
                     
-                (_, all_losses), grads = jax.value_and_grad(self.pre_train_loss_fn, argnums=0, has_aux=True)(params, grade_idx)
+                (_, all_losses), grads = jax.value_and_grad(self.pre_train_loss_fn_stage1, argnums=0, has_aux=True)(params, grade_idx)
                 updates, opt_state = optimizer.update(grads, opt_state)
                 params = optax.apply_updates(params, updates)
                 if iter % 100 == 0:
@@ -324,15 +324,15 @@ class MinMaxOptProb:
             for iter in range(self.epoch_stage2):
                 if iter % self.f_adaptive == 0:
                     self.update_adaptive_weights(params=None, phase='pre-train', params_last_k=params_last_k)
-                    print(f"Grade {grade_idx}, Iteration {iter}, lambda_ic: {self.lambda_ic:.8f}, lambda_bc: {self.lambda_bc:.8f}, lambda_r: {self.lambda_r:.8f}")
+                    print(f"Second Stage, Epoch {iter}, lambda_ic: {self.lambda_ic:.8f}, lambda_bc: {self.lambda_bc:.8f}, lambda_r: {self.lambda_r:.8f}")
                 (_, all_losses), grads = jax.value_and_grad(self.pre_train_loss_fn_stage2, argnums=0, has_aux=True)(params_last_k)
                 updates, opt_state = optimizer.update(grads, opt_state)
                 params_last_k = optax.apply_updates(params_last_k, updates)
                 if iter % 100 == 0:
                     loss_eqn, loss_ibc = all_losses
                     loss = loss_eqn + loss_ibc
-                    print(f"Second Stage, Epoch {iter}, Loss: {loss:.8f}")
-                    wandb.log({"second_stage_loss": loss_eqn, f"grade_{grade_idx}_loss_ibc": loss_ibc, "step": self.global_step + iter})
+                    print(f"Second Stage, Epoch {iter}, loss: {loss:.8f}, loss_eqn: {loss_eqn:.8f}, loss_ibc: {loss_ibc:.8f}")
+                    wandb.log({"second_stage_loss": loss_eqn, "second_stage_loss_ibc": loss_ibc, "step": self.global_step + iter})
             for mlp, params in zip(self.model.mlps[-self.k:], params_last_k):
                 mlp.params = params
             self.global_step += self.epoch_stage2
@@ -350,14 +350,14 @@ class MinMaxOptProb:
         
 
     def loss_ic_stage1(self, params, grade_idx):
-        params_list = [self.mg_nn.mlps[j].params for j in range(grade_idx)] + [params]
-        u_eval = lambda X: self.mg_nn.forward_with_params(params_list, X)
+        params_list = [self.model.mlps[j].params for j in range(grade_idx)] + [params]
+        u_eval = lambda X: self.model.forward_with_params(params_list, X)
         loss_ic = jnp.mean((u_eval(self.tx_t0) - self.u_t0)**2)
         return loss_ic
 
     def loss_bc_stage1(self, params, grade_idx):
-        params_list = [self.mg_nn.mlps[j].params for j in range(grade_idx)] + [params]
-        u_eval = lambda X: self.mg_nn.forward_with_params(params_list, X)
+        params_list = [self.model.mlps[j].params for j in range(grade_idx)] + [params]
+        u_eval = lambda X: self.model.forward_with_params(params_list, X)
         u_x0_nn = u_eval(self.tx_x0)
         bc_x0_loss = jnp.mean((u_x0_nn - self.u_x0)**2)
         u_x1_nn = u_eval(self.tx_x1)
@@ -366,18 +366,18 @@ class MinMaxOptProb:
         return loss_bc
 
     def loss_ic_stage2(self, params_last_k):
-        n = len(self.mg_nn.mlps)
-        fixed_params = [self.mg_nn.mlps[i].params for i in range(n - self.k)]
+        n = len(self.model.mlps)
+        fixed_params = [self.model.mlps[i].params for i in range(n - self.k)]
         params_list = fixed_params + list(params_last_k)
-        u_eval = lambda X: self.mg_nn.forward_with_params(params_list, X)
+        u_eval = lambda X: self.model.forward_with_params(params_list, X)
         loss_ic = jnp.mean((u_eval(self.tx_t0) - self.u_t0)**2)
         return loss_ic
     
     def loss_bc_stage2(self, params_last_k):
-        n = len(self.mg_nn.mlps)
-        fixed_params = [self.mg_nn.mlps[i].params for i in range(n - self.k)]
+        n = len(self.model.mlps)
+        fixed_params = [self.model.mlps[i].params for i in range(n - self.k)]
         params_list = fixed_params + list(params_last_k)
-        u_eval = lambda X: self.mg_nn.forward_with_params(params_list, X)
+        u_eval = lambda X: self.model.forward_with_params(params_list, X)
         u_x0_nn = u_eval(self.tx_x0)
         bc_x0_loss = jnp.mean((u_x0_nn - self.u_x0)**2)
         u_x1_nn = u_eval(self.tx_x1)
@@ -386,8 +386,8 @@ class MinMaxOptProb:
         return loss_bc
     
     def loss_eqn_stage1(self, params, grade_idx):
-        params_list = [self.mg_nn.mlps[j].params for j in range(grade_idx)] + [params]
-        u_eval = lambda X: self.mg_nn.forward_with_params(params_list, X)
+        params_list = [self.model.mlps[j].params for j in range(grade_idx)] + [params]
+        u_eval = lambda X: self.model.forward_with_params(params_list, X)
         # Interior loss
         quad_points = self.pwp.quad_points
         u_quad = u_eval(quad_points)
@@ -400,10 +400,10 @@ class MinMaxOptProb:
         return loss_res
     
     def loss_eqn_stage2(self, params_last_k):
-        n = len(self.mg_nn.mlps)
-        fixed_params = [self.mg_nn.mlps[i].params for i in range(n - self.k)]
+        n = len(self.model.mlps)
+        fixed_params = [self.model.mlps[i].params for i in range(n - self.k)]
         params_list = fixed_params + list(params_last_k)
-        u_eval = lambda X: self.mg_nn.forward_with_params(params_list, X)
+        u_eval = lambda X: self.model.forward_with_params(params_list, X)
         # Interior loss
         quad_points = self.pwp.quad_points
         u_quad = u_eval(quad_points)
