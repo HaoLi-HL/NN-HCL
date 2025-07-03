@@ -146,6 +146,16 @@ class MG_NN:
             sum_out += out
             temp = out_wo_layer
         return sum_out
+    
+    def forward_with_params(self, params_list, x):
+        temp = x
+        sum_out = 0
+        for i, params in enumerate(params_list):
+            mlp = self.model.mlps[i]
+            out, out_wo_layer = mlp.forward(params, temp, extra_output=True)
+            sum_out += out
+            temp = out_wo_layer
+        return sum_out
 
 # Example usage for a regression problem (to be implemented externally):
 # 1. Initialize MG_NN with input_dim=2 and hidden_dims_list=[(64,64), (32,32)]
