@@ -76,7 +76,7 @@ class MinMaxOptProb:
         self.decay_rates = decay_rates
         self.optimizer_list = []
         for i in range(total_grade):
-            self.model.add_grade()  # Add a new grade
+            self.model.add_grade()
             lr = optax.exponential_decay(init_value=init_lrs[i], transition_steps=grade_epochs[i], decay_rate=decay_rates[i])
             self.optimizer_list.append(optax.adam(lr))
         self.opt_state_list = [opt.init(self.model.mlps[i].params) for i, opt in enumerate(self.optimizer_list)]
