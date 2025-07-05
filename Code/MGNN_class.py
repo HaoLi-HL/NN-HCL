@@ -159,14 +159,14 @@ class MG_NN:
     
     def forward_with_params(self, params, x, grade_idx):
         fixed_params = [self.mlps[i].params for i in range(grade_idx)]
-        params_list = fixed_params + list(params)
+        params_list = fixed_params + [params]
         return self.forward_with_params_list(params_list, x)
 
     
     def forward_with_params_last_k(self, params_last_k, x, k):
         n = len(self.mlps)
         fixed_params = [self.mlps[i].params for i in range(n - k)]
-        params_list = fixed_params + list(params_last_k)
+        params_list = fixed_params + params_last_k
         return self.forward_with_params_list(params_list, x)
 
 
