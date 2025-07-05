@@ -125,7 +125,7 @@ class MinMaxOptProb:
     def maximize_kh_vec(self, params, current_key):
         Nt = self.pwp.N_elements
         vertices_all = self.pwp.triangles
-        u_values_all = self.u_eval(vertices_all.reshape(-1, 2)).reshape(Nt, 3, -1)
+        u_values_all = self.u_eval(params, vertices_all.reshape(-1, 2)).reshape(Nt, 3, -1)
         A_all = jnp.stack([jnp.ones((Nt, 3)), vertices_all[:, :, 0], vertices_all[:, :, 1]], axis=-1)
         init_coeffs_all = jnp.linalg.solve(A_all, u_values_all.reshape(Nt, 3, 1)).squeeze(-1)
         key, current_key = jax.random.split(current_key)
@@ -296,6 +296,8 @@ class MinMaxOptProb:
         print(f"Train total time: {train_total_time:.8f} seconds")
         print(f"Train average time per iteration: {train_total_time / (sum(self.grade_epochs) + self.epoch_stage2):.9e} seconds")
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        wandb.finish()
         if save_model:
             model_path = os.path.join('..', 'data', f'train_model_{timestamp}.pkl')
             self.save_model(model_path)
