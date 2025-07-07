@@ -28,7 +28,7 @@ def pytree_l2_norm(pytree):
 class MinMaxOptProb:
     def __init__(self, N_t=10, N_x=10, lr_theta=0.01, hidden_dims_list=[(64, 64), (32, 32), (16, 16)], seed=0, sigma=0.1, N_perturb=5000, N_bc=100, N_ic=100,
                  t_min=0, t_max=1, x_min=0, x_max=1, k_h_rf_times=1, u0=None, u1=None, u2=None, lambda_bc_static=0.9,
-                 init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[5000, 5000, 5000], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=10000, decay_rate_stage2=1e-3,
+                 init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  f_adaptive_weight=1000, f_opt_kh=10, nu=0.001, res_visc=None, res=None, use_loss_fn_elem_int=True, total_grade=3, k=2):
         self.pwp = PiecewiseLinearPolynomials(N_t, N_x, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, times=k_h_rf_times)
         self.lr_theta = lr_theta
@@ -98,7 +98,7 @@ class MinMaxOptProb:
         
     def gen_funcs(self, grade_idx=None):
         if grade_idx is None:
-            net_u = lambda params_last_k, X: self.model.forward_with_params_last_k(params_last_k, X).squeeze()
+            net_u = lambda params_last_k, X: self.model.forward_with_params_last_k(params_last_k, X, self.k).squeeze()
         else:
             net_u = lambda params, X: self.model.forward_with_params(params, X, grade_idx).squeeze()
         self.u_eval = jit(vmap(net_u, in_axes = (None, 0)))
@@ -137,7 +137,7 @@ class MinMaxOptProb:
         best_coeffs_all = perturbed_coeffs_all[jnp.arange(Nt), best_indices]
         return best_coeffs_all, current_key
 
-    def loss_fn_elem_int(self, params, p_coeffs):
+    def loss_fn_elem_int(self, params):
         quad_points = self.pwp.quad_points
         quad_weights = self.pwp.quad_weights.flatten()
         u_quad = self.u_eval(params, quad_points)
@@ -147,7 +147,7 @@ class MinMaxOptProb:
         u_xx = hessian_u_tx[:, 1, 1].flatten()
         # residual_visc = self.res_visc(u_quad, u_t, u_x, u_xx, self.h**2)
         residual = self.res(u_quad, u_t, u_x).flatten()
-        p_coeffs_quad = p_coeffs[self.pwp.element_indices]
+        p_coeffs_quad = self.pwp.coeffs[self.pwp.element_indices]
         k_h_quad = p_coeffs_quad[:, 0] + p_coeffs_quad[:, 1] * quad_points[:, 0] + p_coeffs_quad[:, 2] * quad_points[:, 1]
         integrand = residual * jnp.sign(u_quad - k_h_quad)
         # integrand = residual * jnp.sign(u_quad - k_h_quad) + jnp.abs(self.h*residual_visc)
@@ -212,20 +212,20 @@ class MinMaxOptProb:
     def loss_fn_ibc(self, params):
         return self.loss_fn_ic(params) + self.loss_fn_bc(params)
 
-    def loss_fn(self, params, p_coeffs):
+    def loss_fn(self, params):
         loss_ic = self.loss_fn_ic(params)
         loss_bc = self.loss_fn_bc(params)
-        loss_eqn = self.loss_fn_elem_int(params, p_coeffs)
+        loss_eqn = self.loss_fn_elem_int(params)
         total_loss = self.lambda_r * loss_eqn + self.lambda_ic * loss_ic + self.lambda_bc * loss_bc
         return total_loss, (loss_eqn, loss_ic + loss_bc)
 
-    def train_step(self, params, p_coeffs, optimizar, opt_state):
-        (_, all_losses), grads = jax.value_and_grad(self.loss_fn, argnums=0, has_aux=True)(params, p_coeffs)
+    def train_step(self, params, optimizar, opt_state):
+        (_, all_losses), grads = jax.value_and_grad(self.loss_fn, argnums=0, has_aux=True)(params)
         updates, opt_state = optimizar.update(grads, opt_state)
         params = optax.apply_updates(params, updates)
         return all_losses[0], all_losses[1], params, opt_state
 
-    def train_process(self, save_model=True):
+    def train_process(self, save_model=False):
         print("\nStarting Train Stage with MGDL")
         start_time = time.perf_counter()
         self.global_step = 0
@@ -255,11 +255,11 @@ class MinMaxOptProb:
             self.pwp.coeffs, self.key = self.maximize_kh(params, self.key)
             for iter in range(self.grade_epochs[grade_idx]):
                 if iter % self.f_adaptive_weight == 0:
-                    self.update_adaptive_weights(phase='train', grade_idx=grade_idx)
+                    self.update_adaptive_weights(params=params)
                     print(f"Grade {grade_idx}, Iter {iter}, lambda_ic: {self.lambda_ic:.8f}, lambda_bc: {self.lambda_bc:.8f}, lambda_r: {self.lambda_r:.8f}")
                 if iter % self.f_opt_kh == 0:
-                    self.pwp.coeffs, self.key = self.maximize_kh(self.key)
-                loss_eqn, loss_ibc, params, opt_state = self.train_step(self.pwp.coeffs, grade_idx, optimizar, opt_state)
+                    self.pwp.coeffs, self.key = self.maximize_kh(params, self.key)
+                loss_eqn, loss_ibc, params, opt_state = self.train_step(params, optimizar, opt_state)
                 if iter % 100 == 0:
                     print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.8f}, loss_ibc: {loss_ibc:.8f}")
                     wandb.log({f"grade_{grade_idx}_loss_eqn": loss_eqn, f"grade_{grade_idx}_loss_ibc": loss_ibc, "step": self.global_step + iter})
@@ -279,11 +279,11 @@ class MinMaxOptProb:
             self.pwp.coeffs, self.key = self.maximize_kh(params_last_k, self.key)
             for iter in range(self.epoch_stage2):
                 if iter % self.f_adaptive_weight == 0:
-                    self.update_adaptive_weights(phase='train', params_last_k=params_last_k)
+                    self.update_adaptive_weights(params=params_last_k)
                     print(f"Stage 2, Iter {iter}, lambda_ic: {self.lambda_ic:.8f}, lambda_bc: {self.lambda_bc:.8f}, lambda_r: {self.lambda_r:.8f}")
                 if iter % 10 == 0:
                     self.pwp.coeffs, self.key = self.maximize_kh(params_last_k, self.key)
-                loss_eqn, loss_ibc, params_last_k, opt_state = self.train_step(self.pwp.coeffs, params_last_k, optimizar, opt_state)
+                loss_eqn, loss_ibc, params_last_k, opt_state = self.train_step(params_last_k, optimizar, opt_state)
                 if iter % 100 == 0:
                     print(f"Stage 2, Iter {iter}, loss_eqn: {loss_eqn:.8f}, loss_ibc: {loss_ibc:.8f}")
                     wandb.log({"second_stage_loss": loss_eqn, "second_stage_loss_ibc": loss_ibc, "step": self.global_step + iter})
@@ -303,18 +303,10 @@ class MinMaxOptProb:
             self.save_model(model_path)
             print(f"Train model saved to {model_path}")
         
-    def update_adaptive_weights(self, phase='train', grade_idx=None, params_last_k=None):
-        if phase == 'train':
-            if params_last_k is not None:
-                grad_loss_ic = grad(self.loss_fn_ic)(params_last_k)
-                grad_loss_bc = grad(self.loss_fn_bc)(params_last_k)
-                grad_loss_int = grad(lambda p: self.loss_fn_elem_int(p, params_last_k))(self.pwp.coeffs)
-            else:
-                grad_loss_ic = grad(self.loss_fn_ic)()
-                grad_loss_bc = grad(self.loss_fn_bc)()
-                grad_loss_int = grad(lambda p: self.loss_fn_elem_int(p, grade_idx))(self.pwp.coeffs)
-        else:
-            raise ValueError("Unknown phase for update_adaptive_weights.")
+    def update_adaptive_weights(self, params):
+        grad_loss_ic = grad(self.loss_fn_ic)(params)
+        grad_loss_bc = grad(self.loss_fn_bc)(params)
+        grad_loss_int = grad(self.loss_fn_elem_int)(params)
         norm_ic = pytree_l2_norm(grad_loss_ic)
         norm_bc = pytree_l2_norm(grad_loss_bc)
         norm_r = pytree_l2_norm(grad_loss_int)
@@ -328,6 +320,7 @@ class MinMaxOptProb:
         self.lambda_r = self.alpha * self.lambda_r + (1 - self.alpha) * hat_lambda_r
 
     def save_model(self, model_path):
+        os.makedirs(os.path.dirname(model_path), exist_ok=True)
         save_dict = {
             'params': [mlp.params for mlp in self.model.mlps],
             'hidden_dims_list': self.model.hidden_dims_list,
