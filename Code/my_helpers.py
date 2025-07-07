@@ -18,9 +18,10 @@ def plot_loss_history(loss_int, loss_bc, title):
     plt.show()
 
 # Function to plot u_theta
-def plot_u_theta(model, params, M_t=100, M_x=100, t_min=0.0, t_max=1.0, x_min=0.0, x_max=1.0):
+def plot_u_theta(model, params=None, M_t=100, M_x=100, t_min=0.0, t_max=1.0, x_min=0.0, x_max=1.0):
     """
-    Plot the neural network function u_theta over a specified domain [t_min, t_max] x [x_min, x_max].
+    Plot the neural network function u_theta over a specified domain [t_min, t_max] x [x_min, x_max],
+    and include a 1D plot of u_theta at t = t_max.
 
     Args:
         model: Flax model instance representing u_theta.
@@ -41,21 +42,31 @@ def plot_u_theta(model, params, M_t=100, M_x=100, t_min=0.0, t_max=1.0, x_min=0.
     tx_points = jnp.stack([t.ravel(), x.ravel()], axis=1)  # Shape: (M_t * M_x, 2)
 
     # Evaluate u_theta on the grid points
-    # u_values = model.apply(params, tx_points)  # Shape: (M_t * M_x, 1)
-    u_values = model(params, tx_points)  # Shape: (M_t * M_x, 1)
+    if params is None:
+        u_values = model.forward(tx_points)
+    else:
+        u_values = model(params, tx_points)  # Shape: (M_t * M_x, 1)
     u_values = u_values.reshape(M_t, M_x)  # Reshape to (M_t, M_x)
 
-    # Create the plot
-    height = (t_max - t_min)*4
-    width = (x_max - x_min)*4 + 1
-    plt.figure(figsize=(width, height))
-    plt.pcolormesh(x_grid, t_grid, u_values, shading='nearest', cmap='viridis')
-    plt.colorbar(label='$u_\\theta(t, x)$')
-    plt.xlabel('x')
-    plt.ylabel('t')
-    plt.title('Neural Network Function $u_\\theta$')
-    plt.show()
+    # Create figure with two subplots
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
 
+    # 2D color mesh plot
+    pcm = ax1.pcolormesh(x_grid, t_grid, u_values, shading='nearest', cmap='viridis')
+    fig.colorbar(pcm, ax=ax1, label='$u_\\theta(t, x)$')
+    ax1.set_xlabel('x')
+    ax1.set_ylabel('t')
+    ax1.set_title('Neural Network Function $u_\\theta$')
+
+    # 1D plot at t = t_max
+    ax2.plot(x_grid, u_values[-1, :])
+    ax2.set_xlabel('x')
+    ax2.set_ylabel('$u_\\theta(t_{max}, x)$')
+    ax2.set_title(f'Neural Network Function at t = {t_max}')
+
+    # Adjust layout and display
+    plt.tight_layout()
+    plt.show()
 
 import matplotlib.pyplot as plt
 import jax.numpy as jnp

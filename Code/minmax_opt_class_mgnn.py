@@ -299,7 +299,7 @@ class MinMaxOptProb:
 
         wandb.finish()
         if save_model:
-            model_path = os.path.join('..', 'data', f'train_model_{timestamp}.pkl')
+            model_path = os.path.join('data', f'train_model_{timestamp}.pkl')
             self.save_model(model_path)
             print(f"Train model saved to {model_path}")
         
