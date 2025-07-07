@@ -143,8 +143,8 @@ class MinMaxOptProb:
         u_quad = self.u_eval(params, quad_points)
         grad_u_tx = self.grad_u(params, quad_points)
         u_t, u_x = grad_u_tx[:, 0], grad_u_tx[:, 1]
-        hessian_u_tx = self.hessian_u(params, quad_points)
-        u_xx = hessian_u_tx[:, 1, 1].flatten()
+        # hessian_u_tx = self.hessian_u(params, quad_points)
+        # u_xx = hessian_u_tx[:, 1, 1].flatten()
         # residual_visc = self.res_visc(u_quad, u_t, u_x, u_xx, self.h**2)
         residual = self.res(u_quad, u_t, u_x).flatten()
         p_coeffs_quad = self.pwp.coeffs[self.pwp.element_indices]
