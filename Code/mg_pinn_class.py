@@ -76,7 +76,7 @@ class MinMaxOptProb:
         self.decay_rates = decay_rates
         self.optimizer_list = []
         for i in range(total_grade):
-            self.model.add_grade()  # Add a new grade
+            self.model.add_grade()
             lr = optax.exponential_decay(init_value=init_lrs[i], transition_steps=grade_epochs[i], decay_rate=decay_rates[i])
             self.optimizer_list.append(optax.adam(lr))
         self.opt_state_list = [opt.init(self.model.mlps[i].params) for i, opt in enumerate(self.optimizer_list)]
@@ -233,7 +233,7 @@ class MinMaxOptProb:
     def pre_train_loss_fn_stage1(self, params, grade_idx):
         """Loss function for first stage of MGDL pre-training."""
         params_list = [self.model.mlps[j].params for j in range(grade_idx)] + [params]
-        u_eval = lambda X: self.model.forward_with_params(params_list, X)
+        u_eval = lambda X: self.model.forward_with_params_list(params_list, X)
         # IC loss
         L_ic = jnp.mean((u_eval(self.tx_t0) - self.u_t0)**2)
         # BC loss
@@ -258,7 +258,7 @@ class MinMaxOptProb:
         n = len(self.model.mlps)
         fixed_params = [self.model.mlps[i].params for i in range(n - self.k)]
         params_list = fixed_params + list(params_last_k)
-        u_eval = lambda X: self.model.forward_with_params(params_list, X)
+        u_eval = lambda X: self.model.forward_with_params_list(params_list, X)
         # IC loss
         L_ic = jnp.mean((u_eval(self.tx_t0) - self.u_t0)**2)
         # BC loss
@@ -351,13 +351,13 @@ class MinMaxOptProb:
 
     def loss_ic_stage1(self, params, grade_idx):
         params_list = [self.model.mlps[j].params for j in range(grade_idx)] + [params]
-        u_eval = lambda X: self.model.forward_with_params(params_list, X)
+        u_eval = lambda X: self.model.forward_with_params_list(params_list, X)
         loss_ic = jnp.mean((u_eval(self.tx_t0) - self.u_t0)**2)
         return loss_ic
 
     def loss_bc_stage1(self, params, grade_idx):
         params_list = [self.model.mlps[j].params for j in range(grade_idx)] + [params]
-        u_eval = lambda X: self.model.forward_with_params(params_list, X)
+        u_eval = lambda X: self.model.forward_with_params_list(params_list, X)
         u_x0_nn = u_eval(self.tx_x0)
         bc_x0_loss = jnp.mean((u_x0_nn - self.u_x0)**2)
         u_x1_nn = u_eval(self.tx_x1)
@@ -369,7 +369,7 @@ class MinMaxOptProb:
         n = len(self.model.mlps)
         fixed_params = [self.model.mlps[i].params for i in range(n - self.k)]
         params_list = fixed_params + list(params_last_k)
-        u_eval = lambda X: self.model.forward_with_params(params_list, X)
+        u_eval = lambda X: self.model.forward_with_params_list(params_list, X)
         loss_ic = jnp.mean((u_eval(self.tx_t0) - self.u_t0)**2)
         return loss_ic
     
@@ -377,7 +377,7 @@ class MinMaxOptProb:
         n = len(self.model.mlps)
         fixed_params = [self.model.mlps[i].params for i in range(n - self.k)]
         params_list = fixed_params + list(params_last_k)
-        u_eval = lambda X: self.model.forward_with_params(params_list, X)
+        u_eval = lambda X: self.model.forward_with_params_list(params_list, X)
         u_x0_nn = u_eval(self.tx_x0)
         bc_x0_loss = jnp.mean((u_x0_nn - self.u_x0)**2)
         u_x1_nn = u_eval(self.tx_x1)
@@ -387,7 +387,7 @@ class MinMaxOptProb:
     
     def loss_eqn_stage1(self, params, grade_idx):
         params_list = [self.model.mlps[j].params for j in range(grade_idx)] + [params]
-        u_eval = lambda X: self.model.forward_with_params(params_list, X)
+        u_eval = lambda X: self.model.forward_with_params_list(params_list, X)
         # Interior loss
         quad_points = self.pwp.quad_points
         u_quad = u_eval(quad_points)
@@ -403,7 +403,7 @@ class MinMaxOptProb:
         n = len(self.model.mlps)
         fixed_params = [self.model.mlps[i].params for i in range(n - self.k)]
         params_list = fixed_params + list(params_last_k)
-        u_eval = lambda X: self.model.forward_with_params(params_list, X)
+        u_eval = lambda X: self.model.forward_with_params_list(params_list, X)
         # Interior loss
         quad_points = self.pwp.quad_points
         u_quad = u_eval(quad_points)
