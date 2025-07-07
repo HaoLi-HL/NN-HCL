@@ -27,7 +27,7 @@ def pytree_l2_norm(pytree):
 # Optimizer Class
 class MinMaxOptProb:
     def __init__(self, N_t=10, N_x=10, lr_theta=0.01, hidden_dims_list=[(64, 64), (32, 32), (16, 16)], seed=0, sigma=0.1, N_perturb=5000, N_bc=100, N_ic=100,
-                 t_min=0, t_max=1, x_min=0, x_max=1, k_h_rf_times=1, u0=None, u1=None, u2=None, lambda_bc_static=0.9,
+                 t_min=0, t_max=1, x_min=0, x_max=1, k_h_rf_times=1, u0=None, u1=None, u2=None, lambda_bc_static=0.9, project="minmax_opt_mgnn_burgers", 
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  f_adaptive_weight=1000, f_opt_kh=10, nu=0.001, res_visc=None, res=None, use_loss_fn_elem_int=True, total_grade=3, k=2):
         self.pwp = PiecewiseLinearPolynomials(N_t, N_x, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, times=k_h_rf_times)
@@ -65,6 +65,8 @@ class MinMaxOptProb:
             self.loss_fn_eqn = self.loss_fn_elem_bdry
         self.grade_epochs = grade_epochs
         self.epoch_stage2 = epoch_stage2
+        
+        self.project = project
 
         # Initialize optimizers for each grade of the first stage
         self.init_lrs = init_lrs
@@ -229,7 +231,7 @@ class MinMaxOptProb:
         print("\nStarting Train Stage with MGDL")
         start_time = time.perf_counter()
         self.global_step = 0
-        wandb.init(project="minmax_opt_mgnn_burgers", name=f"total_grade_{self.total_grade}_k_{self.k}", config={
+        wandb.init(project=self.project, name=f"total_grade_{self.total_grade}_k_{self.k}", config={
             "total_grade": self.total_grade,
             "k": self.k,
             "hidden_dims_list": self.model.hidden_dims_list,
