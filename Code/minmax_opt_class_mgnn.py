@@ -232,7 +232,7 @@ class MinMaxOptProb:
         print("\nStarting Train Stage with MGDL")
         start_time = time.perf_counter()
         self.global_step = 0
-        wandb.init(project=self.project, name=f"total_grade_{self.total_grade}_k_{self.k}", config={
+        wandb.init(project=self.project, name=f"total_grade_{self.total_grade}_k_{self.k}_opt_kh_{self.f_opt_kh}", config={
             "total_grade": self.total_grade,
             "k": self.k,
             "hidden_dims_list": self.model.hidden_dims_list,
@@ -289,7 +289,7 @@ class MinMaxOptProb:
                 loss_eqn, loss_ibc, params_last_k, opt_state = self.train_step(params_last_k, optimizar, opt_state)
                 if iter % 100 == 0:
                     print(f"Stage 2, Iter {iter}, loss_eqn: {loss_eqn:.8f}, loss_ibc: {loss_ibc:.8f}")
-                    wandb.log({"second_stage_loss": loss_eqn, "second_stage_loss_ibc": loss_ibc, "step": self.global_step + iter})
+                    wandb.log({"second_stage_loss_eqn": loss_eqn, "second_stage_loss_ibc": loss_ibc, "step": self.global_step + iter})
             for mlp, p in zip(self.model.mlps[-self.k:], params_last_k):
                 mlp.params = p
             self.global_step += self.epoch_stage2
