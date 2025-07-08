@@ -3,7 +3,7 @@ from jax import random
 
 class MLP:
     """Simple MLP for approximating functions without Flax, adapted for variable input dimensions."""
-    def __init__(self, input_dim, hidden_dims=(64, 64), activation=jnp.tanh, lb=None, ub=None, normalize_input=True, seed=0):
+    def __init__(self, input_dim, hidden_dims=(64, 64), activation=jnp.tanh, lb=None, ub=None, normalize_input=True, seed=0, use_a=True):
         """
         Initialize the MLP with custom input dimension, hidden layers, and activation function.
 
@@ -15,6 +15,7 @@ class MLP:
             ub: Upper bound for input normalization (shape: (input_dim,)).
             normalize_input: Boolean to enable/disable input normalization.
             seed: Random seed for initialization.
+            use_a: Boolean to include trainable scalar 'a' (default: True).
         """
         self.input_dim = input_dim
         self.hidden_dims = hidden_dims
@@ -24,17 +25,19 @@ class MLP:
             self.lb = lb if lb is not None else jnp.zeros((input_dim,))
             self.ub = ub if ub is not None else jnp.ones((input_dim,))
         self.key = random.PRNGKey(seed)
+        self.use_a = use_a
         self.params = self.initialize_params()
 
     def initialize_params(self):
-        """Initialize parameters (weights, biases, and scalar 'a') using Xavier initialization."""
+        """Initialize parameters (weights, biases, and optionally scalar 'a') using Xavier initialization."""
         params = []
         num_layers = len(self.hidden_dims) + 1  # Hidden layers + output layer
         keys = random.split(self.key, num_layers)
         
-        # Initialize trainable scalar 'a'
-        a = jnp.sqrt(0.01)
-        params.append(a)
+        if self.use_a:
+            # Initialize trainable scalar 'a'
+            a = jnp.sqrt(0.01)
+            params.append(a)
         
         # Layers from input to output
         layers = [self.input_dim] + list(self.hidden_dims) + [1]  # Output dim = 1 for regression
@@ -55,7 +58,8 @@ class MLP:
         Compute the forward pass of the MLP.
 
         Args:
-            params: List containing [a, (W1, b1), (W2, b2), ..., (Wn, bn)].
+            params: List containing [a, (W1, b1), (W2, b2), ..., (Wn, bn)] if use_a is True,
+                    else [(W1, b1), (W2, b2), ..., (Wn, bn)].
             x: Input array of shape (batch_size, input_dim) or (input_dim,).
 
         Returns:
@@ -64,13 +68,21 @@ class MLP:
         if self.normalize_input:
             x = 2.0 * (x - self.lb) / (self.ub - self.lb) - 1.0
         
-        a = params[0]
-        for l in range(1, len(params) - 1):
-            W, b = params[l]
-            x = jnp.dot(x, W.T) + b
-            x = self.activation(10.0 * a * x)
+        if self.use_a:
+            a = params[0]
+            layer_params = params[1:]
+        else:
+            layer_params = params
         
-        W, b = params[-1]
+        for l in range(len(self.hidden_dims)):
+            W, b = layer_params[l]
+            x = jnp.dot(x, W.T) + b
+            if self.use_a:
+                x = self.activation(10.0 * a * x)
+            else:
+                x = self.activation(x)
+        
+        W, b = layer_params[-1]
         y = jnp.dot(x, W.T) + b
         out_wo_layer = x
         out = jnp.squeeze(y)
@@ -78,7 +90,6 @@ class MLP:
             return out, out_wo_layer
         else:
             return out
-    
 
     def __call__(self, params, x):
         """Convenience method to match original interface."""
