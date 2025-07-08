@@ -36,7 +36,7 @@ class MinMaxOptProb:
         self.ub = jnp.array([t_max, x_max])
         self.h = (x_max - x_min)/N_x
         self.model = MG_NN(input_dim=2, hidden_dims_list=hidden_dims_list, activation=nn.tanh, lb=self.lb, ub=self.ub, seed=seed)
-        self.total_grade = total_grade  # Number of grades for MGDL
+        self.total_grade = len(hidden_dims_list)  # Number of grades for MGDL
         self.k = k  # Number of grades to refine in second stage
         self.key = jax.random.PRNGKey(seed)
         self.sigma = sigma
@@ -49,8 +49,8 @@ class MinMaxOptProb:
         self.u1 = u1
         self.u2 = u2
         self.lambda_bc_static = lambda_bc_static
-        self.lambda_ic = 10.0
-        self.lambda_bc = 10.0
+        self.lambda_ic = 100.0
+        self.lambda_bc = 100.0
         self.lambda_r = 1.0
         self.f_adaptive_weight = f_adaptive_weight
         self.f_opt_kh = f_opt_kh
@@ -123,7 +123,8 @@ class MinMaxOptProb:
         loss = jnp.sum(quad_weights[None, :] * integrand_all, axis=1)
         return loss
 
-    
+
+
     def maximize_kh_vec(self, params, current_key):
         Nt = self.pwp.N_elements
         vertices_all = self.pwp.triangles
@@ -227,7 +228,7 @@ class MinMaxOptProb:
         params = optax.apply_updates(params, updates)
         return all_losses[0], all_losses[1], params, opt_state
 
-    def train_process(self, save_model=False):
+    def train_process(self, save_model=True):
         print("\nStarting Train Stage with MGDL")
         start_time = time.perf_counter()
         self.global_step = 0
