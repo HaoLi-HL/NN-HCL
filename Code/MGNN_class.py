@@ -97,7 +97,7 @@ class MLP:
 
 class MG_NN:
     """Multi-Grade Neural Network for regression, stacking shallow MLPs."""
-    def __init__(self, input_dim, hidden_dims_list, activation=jnp.tanh, lb=None, ub=None, seed=0):
+    def __init__(self, input_dim, hidden_dims_list, activation=jnp.tanh, lb=None, ub=None, seed=0, use_a=True):
         """
         Initialize the MG_NN with input dimension and a list of hidden dimensions for each grade.
 
@@ -117,6 +117,7 @@ class MG_NN:
         self.seed = seed
         self.mlps = []
         self.current_grade = 0
+        self.use_a=use_a
 
     def add_grade(self):
         """Add a new grade to the network."""
@@ -128,7 +129,8 @@ class MG_NN:
                       lb=self.lb,
                       ub=self.ub,
                       normalize_input=True,
-                      seed=self.seed)
+                      seed=self.seed,
+                      use_a=self.use_a)
         else:
             # Subsequent grades: input_dim is the last hidden dim of the previous grade, no normalization
             last_hidden_dim = self.hidden_dims_list[self.current_grade - 1][-1]
@@ -136,7 +138,8 @@ class MG_NN:
                       hidden_dims=self.hidden_dims_list[self.current_grade],
                       activation=self.activation,
                       normalize_input=False,
-                      seed=self.seed)
+                      seed=self.seed,
+                      use_a=self.use_a)
         self.mlps.append(mlp)
         self.current_grade += 1
 
