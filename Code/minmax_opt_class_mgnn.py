@@ -69,6 +69,7 @@ class MinMaxOptProb:
         
         self.L1_regularization = L1_regularization
         self.project = project
+        self.run_name = f"grade_{self.total_grade}_k_{self.k}_opt_kh_{self.f_opt_kh}_N_perturb_{N_perturb}_nu_{self.nu}_L1_{self.L1_regularization}_seed_{seed}"
 
         # Initialize optimizers for each grade of the first stage
         self.init_lrs = init_lrs
@@ -236,7 +237,7 @@ class MinMaxOptProb:
         print("\nStarting Train Stage with MGDL")
         start_time = time.perf_counter()
         self.global_step = 0
-        wandb.init(project=self.project, name=f"total_grade_{self.total_grade}_k_{self.k}_opt_kh_{self.f_opt_kh}", config={
+        wandb.init(project=self.project, name=self.run_name, config={
             "total_grade": self.total_grade,
             "k": self.k,
             "hidden_dims_list": self.model.hidden_dims_list,
