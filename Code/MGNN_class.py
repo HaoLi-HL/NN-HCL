@@ -154,22 +154,22 @@ class MG_NN:
             Scalar output representing the sum of all grades' predictions.
         """
         temp = x
-        sum_out = 0
+        sum_grade = 0
         for mlp in self.mlps:
             out, out_wo_layer = mlp.forward(mlp.params, temp, extra_output=True)
-            sum_out += out
+            sum_grade += out
             temp = out_wo_layer
-        return sum_out
+        return sum_grade
     
     def forward_with_params_list(self, params_list, x):
         temp = x
-        sum_out = 0
+        sum_grade = 0
         for i, params in enumerate(params_list):
             mlp = self.mlps[i]
             out, out_wo_layer = mlp.forward(params, temp, extra_output=True)
-            sum_out += out
+            sum_grade += out
             temp = out_wo_layer
-        return sum_out
+        return sum_grade
     
     def forward_with_params(self, params, x, grade_idx):
         fixed_params = [self.mlps[i].params for i in range(grade_idx)]
@@ -182,6 +182,20 @@ class MG_NN:
         fixed_params = [self.mlps[i].params for i in range(n - k)]
         params_list = fixed_params + params_last_k
         return self.forward_with_params_list(params_list, x)
+    
+    def forward_stage2(self, params_stage2, x):
+        temp = x
+        sum_grade = 0
+        for mlp in self.mlps[:-1]:
+            out, out_wo_layer = mlp.forward(mlp.params, temp, extra_output=True)
+            sum_grade += out
+            temp = out_wo_layer
+        temp = x
+        for i, params in enumerate(params_stage2):
+            mlp = self.mlps[i]
+            out, out_wo_layer = mlp.forward(params, temp, extra_output=True)
+            temp = out_wo_layer
+        return sum_grade + out
 
 
 
