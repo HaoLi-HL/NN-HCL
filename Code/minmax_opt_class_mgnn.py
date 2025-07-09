@@ -49,8 +49,8 @@ class MinMaxOptProb:
         self.u1 = u1
         self.u2 = u2
         self.lambda_bc_static = lambda_bc_static
-        self.lambda_ic = 1.0
-        self.lambda_bc = 1.0
+        self.lambda_ic = 10.0
+        self.lambda_bc = 10.0
         self.lambda_r = 1.0
         self.f_adaptive_weight = f_adaptive_weight
         self.f_opt_kh = f_opt_kh
