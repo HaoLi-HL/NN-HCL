@@ -78,7 +78,9 @@ class MinMaxOptProb:
         for i in range(total_grade):
             self.model.add_grade()  # Add a new grade
             self.params_list.append(self.model.mlps[i].params)
-            lr = optax.exponential_decay(init_value=init_lrs[i], transition_steps=grade_epochs[i], decay_rate=decay_rates[i])
+            # lr = optax.exponential_decay(init_value=init_lrs[i], transition_steps=grade_epochs[i], decay_rate=decay_rates[i])
+            # lr = optax.warmup_exponential_decay_schedule(init_value=0, peak_value=init_lrs[i], warmup_steps=200, transition_steps=grade_epochs[i], decay_rate=decay_rates[i])
+            lr = optax.warmup_cosine_decay_schedule(init_value=0, peak_value=init_lrs[i], warmup_steps=200, decay_steps=grade_epochs[i])
             self.optimizer_list.append(optax.adam(lr))
         self.opt_state_list = [opt.init(self.model.mlps[i].params) for i, opt in enumerate(self.optimizer_list)]
         # Optimizer for the second stage

@@ -40,7 +40,8 @@ class MinMaxOptProb:
         self.lb = jnp.array([t_min, x_min])
         self.ub = jnp.array([t_max, x_max])
         self.h = (x_max - x_min)/N_x
-        self.model = MG_NN(input_dim=2, hidden_dims_list=hidden_dims_list, activation=nn.tanh, lb=self.lb, ub=self.ub, seed=seed, use_a=use_a)
+        self.use_a = use_a
+        self.model = MG_NN(input_dim=2, hidden_dims_list=hidden_dims_list, activation=nn.tanh, lb=self.lb, ub=self.ub, seed=seed, use_a=self.use_a)
         self.total_grade = len(hidden_dims_list)  # Number of grades for MGDL
         self.k = k  # Number of layers to train in Stage 2
         self.key = jax.random.PRNGKey(seed)
@@ -68,10 +69,9 @@ class MinMaxOptProb:
             self.loss_fn_eqn = self.loss_fn_elem_int
         else:
             self.loss_fn_eqn = self.loss_fn_elem_bdry
-        self.grade_epochs = grade_epochs
-        self.epoch_stage2 = epoch_stage2
         
         self.project = project
+        self.run_name = f"grade_{self.total_grade}_k_{self.k}_opt_kh_{self.f_opt_kh}_N_perturb_{N_perturb}_nu_{self.nu}_L1_{self.L1_regularization}_seed_{seed}"
 
         # Initialize optimizers for each grade of the first stage
         self.init_lrs = init_lrs
@@ -235,7 +235,7 @@ class MinMaxOptProb:
         print("\nStarting Train Stage with MGDL")
         start_time = time.perf_counter()
         self.global_step = 0
-        wandb.init(project=self.project, name=f"total_grade_{self.total_grade}_k_{self.k}_opt_kh_{self.f_opt_kh}", config={
+        wandb.init(project=self.project, name=self.run_name, config={
             "total_grade": self.total_grade,
             "k": self.k,
             "hidden_dims_list": self.model.hidden_dims_list,
@@ -279,7 +279,7 @@ class MinMaxOptProb:
             # Concatenate hidden dimensions from all grades
             hidden_dims = concatenate_lists(self.model.hidden_dims_list)
             # Create a new MLP with concatenated hidden dimensions
-            self.stage2_model = MLP(input_dim=2, hidden_dims=hidden_dims, activation=nn.tanh, lb=self.lb, ub=self.ub, seed=self.seed)
+            self.stage2_model = MG_NN(input_dim=2, hidden_dims=hidden_dims, activation=nn.tanh, lb=self.lb, ub=self.ub, seed=self.seed, use_a=self.use_a)
             
             # Initialize parameters to match MGNN output after Stage 1
             # MGNN params: [ [a1, (W1_1, b1_1), ...], [a2, (W2_1, b2_1), ...], ... ]
