@@ -30,7 +30,7 @@ class MinMaxOptProb:
                  t_min=0, t_max=1, x_min=0, x_max=1, k_h_rf_times=1, u0=None, u1=None, u2=None, lambda_bc_static=0.9, project="minmax_opt_mgnn_burgers", 
                  L1_regularization=1,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
-                 f_adaptive_weight=1000, f_opt_kh=10, nu=0.001, res_visc=None, res=None, use_loss_fn_elem_int=True, total_grade=3, k=2, use_a=True):
+                 f_adaptive_weight=1000, f_opt_kh=10, nu=0.01, res_visc=None, res=None, use_loss_fn_elem_int=True, total_grade=3, k=2, use_a=True):
         self.pwp = PiecewiseLinearPolynomials(N_t, N_x, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, times=k_h_rf_times)
         self.lr_theta = lr_theta
         self.lb = jnp.array([t_min, x_min])
@@ -148,16 +148,16 @@ class MinMaxOptProb:
         u_quad = self.u_eval(params, quad_points)
         grad_u_tx = self.grad_u(params, quad_points)
         u_t, u_x = grad_u_tx[:, 0], grad_u_tx[:, 1]
-        if self.L1_regularization > 0:
-            hessian_u_tx = self.hessian_u(params, quad_points)
-            u_xx = hessian_u_tx[:, 1, 1].flatten()
-            residual_visc = self.res_visc(u_quad, u_t, u_x, u_xx, self.h**2)
+        # if self.L1_regularization > 0:
+        #     hessian_u_tx = self.hessian_u(params, quad_points)
+        #     u_xx = hessian_u_tx[:, 1, 1].flatten()
+        #     residual_visc = self.res_visc(u_quad, u_t, u_x, u_xx, self.nu)
         residual = self.res(u_quad, u_t, u_x).flatten()
         p_coeffs_quad = self.pwp.coeffs[self.pwp.element_indices]
         k_h_quad = p_coeffs_quad[:, 0] + p_coeffs_quad[:, 1] * quad_points[:, 0] + p_coeffs_quad[:, 2] * quad_points[:, 1]
         integrand = residual * jnp.sign(u_quad - k_h_quad)
-        if self.L1_regularization > 0:
-            integrand += self.L1_regularization * jnp.abs(self.h * residual_visc)
+        # if self.L1_regularization > 0:
+        #     integrand += self.L1_regularization * jnp.abs(self.h * residual_visc)
         # integrand = residual * jnp.sign(u_quad - k_h_quad) + jnp.abs(self.h*residual_visc)
         interior_loss = jnp.dot(quad_weights, integrand)
         return interior_loss
@@ -271,7 +271,7 @@ class MinMaxOptProb:
                 if iter % 100 == 0:
                     print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.8f}, loss_ibc: {loss_ibc:.8f}")
                     wandb.log({f"grade_{grade_idx}_loss_eqn": loss_eqn, f"grade_{grade_idx}_loss_ibc": loss_ibc, "step": self.global_step + iter})
-            self.model.mlps[grade_idx].params = params
+                self.model.mlps[grade_idx].params = params      
             self.opt_state_list[grade_idx] = opt_state
             self.global_step += self.grade_epochs[grade_idx]
 
