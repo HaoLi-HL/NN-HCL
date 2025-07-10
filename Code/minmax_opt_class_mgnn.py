@@ -64,8 +64,6 @@ class MinMaxOptProb:
             self.loss_fn_eqn = self.loss_fn_elem_int
         else:
             self.loss_fn_eqn = self.loss_fn_elem_bdry
-        self.grade_epochs = grade_epochs
-        self.epoch_stage2 = epoch_stage2
         
         self.L1_regularization = L1_regularization
         self.project = project
