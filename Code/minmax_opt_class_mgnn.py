@@ -18,6 +18,7 @@ from my_helpers import plot_u_theta, plot_kh
 from functools import partial
 from Pwp_class import PiecewiseLinearPolynomials
 import wandb
+from jax.tree_util import tree_map
 
 # Utility function to compute L2 norm of a pytree
 def pytree_l2_norm(pytree):
@@ -27,7 +28,8 @@ def pytree_l2_norm(pytree):
 # Optimizer Class
 class MinMaxOptProb:
     def __init__(self, N_t=10, N_x=10, lr_theta=0.01, hidden_dims_list=[(64, 64), (32, 32), (16, 16)], seed=0, sigma=0.1, N_perturb=5000, N_bc=100, N_ic=100,
-                 t_min=0, t_max=1, x_min=0, x_max=1, k_h_rf_times=1, u0=None, u1=None, u2=None, lambda_bc_static=0.9, project="minmax_opt_mgnn_burgers", 
+                 t_min=0, t_max=1, x_min=0, x_max=1, k_h_rf_times=1, u0=None, u1=None, u2=None, lambda_bc_static=0.9, project="minmax_opt_mgnn_burgers",
+                 lambda_ic=10.0, lambda_bc=10.0, lambda_r=1.0, gamma=0.1,
                  L1_regularization=1,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  f_adaptive_weight=1000, f_opt_kh=10, nu=0.01, res_visc=None, res=None, use_loss_fn_elem_int=True, total_grade=3, k=2, use_a=True):
@@ -50,9 +52,10 @@ class MinMaxOptProb:
         self.u1 = u1
         self.u2 = u2
         self.lambda_bc_static = lambda_bc_static
-        self.lambda_ic = 10.0
-        self.lambda_bc = 10.0
-        self.lambda_r = 1.0
+        self.lambda_ic = lambda_ic
+        self.lambda_bc = lambda_bc
+        self.lambda_r = lambda_r
+        self.gamma = gamma
         self.f_adaptive_weight = f_adaptive_weight
         self.f_opt_kh = f_opt_kh
         self.alpha = 0.9
@@ -75,19 +78,22 @@ class MinMaxOptProb:
         self.decay_rates = decay_rates
         self.optimizer_list = []
         self.params_list = []
+        self.lr_schedulers = []
         for i in range(total_grade):
             self.model.add_grade()  # Add a new grade
             self.params_list.append(self.model.mlps[i].params)
-            # lr = optax.exponential_decay(init_value=init_lrs[i], transition_steps=grade_epochs[i], decay_rate=decay_rates[i])
-            # lr = optax.warmup_exponential_decay_schedule(init_value=0, peak_value=init_lrs[i], warmup_steps=200, transition_steps=grade_epochs[i], decay_rate=decay_rates[i])
-            lr = optax.warmup_cosine_decay_schedule(init_value=0, peak_value=init_lrs[i], warmup_steps=200, decay_steps=grade_epochs[i])
-            self.optimizer_list.append(optax.adam(lr))
+            lr = optax.schedules.constant_schedule(init_lrs[i])
+            # lr = optax.schedules.exponential_decay(init_value=init_lrs[i], transition_steps=grade_epochs[i], decay_rate=decay_rates[i])
+            # lr = optax.schedules.warmup_exponential_decay_schedule(init_value=0, peak_value=init_lrs[i], warmup_steps=200, transition_steps=grade_epochs[i], decay_rate=decay_rates[i], end_value=1e-6)
+            # lr = optax.schedules.warmup_cosine_decay_schedule(init_value=1e-6, peak_value=init_lrs[i], warmup_steps=200, decay_steps=grade_epochs[i], end_value=1e-6)
+            self.lr_schedulers.append(lr)
+            self.optimizer_list.append(optax.adam(self.lr_schedulers[i]))
         self.opt_state_list = [opt.init(self.model.mlps[i].params) for i, opt in enumerate(self.optimizer_list)]
         # Optimizer for the second stage
         self.init_lr_stage2 = init_lr_stage2
         self.epoch_stage2 = epoch_stage2
         self.decay_rate_stage2 = decay_rate_stage2
-        lr_stage2 = optax.exponential_decay(init_value=init_lr_stage2, transition_steps=epoch_stage2, decay_rate=decay_rate_stage2)
+        lr_stage2 = optax.exponential_decay(init_value=init_lr_stage2, transition_steps=epoch_stage2, decay_rate=decay_rate_stage2, end_value=1e-6)
         self.optimizer_stage2 = optax.adam(lr_stage2)
         self.opt_state_stage2 = None  # To be initialized later
 
@@ -220,16 +226,22 @@ class MinMaxOptProb:
     def loss_fn_ibc(self, params):
         return self.loss_fn_ic(params) + self.loss_fn_bc(params)
 
+    # def loss_fn(self, params):
+    #     loss_ic = self.loss_fn_ic(params)
+    #     loss_bc = self.loss_fn_bc(params)
+    #     loss_eqn = self.loss_fn_elem_int(params)
+    #     total_loss = self.lambda_r * loss_eqn + self.lambda_ic * loss_ic + self.lambda_bc * loss_bc
+    #     return total_loss, (loss_eqn, loss_ic + loss_bc)
+    
     def loss_fn(self, params):
-        loss_ic = self.loss_fn_ic(params)
-        loss_bc = self.loss_fn_bc(params)
+        loss_ibc = self.loss_fn_ibc(params)
         loss_eqn = self.loss_fn_elem_int(params)
-        total_loss = self.lambda_r * loss_eqn + self.lambda_ic * loss_ic + self.lambda_bc * loss_bc
-        return total_loss, (loss_eqn, loss_ic + loss_bc)
+        total_loss = self.gamma * loss_eqn + (1 - self.gamma) * loss_ibc
+        return total_loss, (loss_eqn, loss_ibc)
 
-    def train_step(self, params, optimizar, opt_state):
+    def train_step(self, params, optimizer, opt_state):
         (_, all_losses), grads = jax.value_and_grad(self.loss_fn, argnums=0, has_aux=True)(params)
-        updates, opt_state = optimizar.update(grads, opt_state)
+        updates, opt_state = optimizer.update(grads, opt_state)
         params = optax.apply_updates(params, updates)
         return all_losses[0], all_losses[1], params, opt_state
 
@@ -258,16 +270,17 @@ class MinMaxOptProb:
             self.gen_funcs(grade_idx)
             self.maximize_kh = jit(self.maximize_kh_vec)
             params = self.model.mlps[grade_idx].params
-            optimizar = self.optimizer_list[grade_idx]
+            optimizer = self.optimizer_list[grade_idx]
             opt_state = self.opt_state_list[grade_idx]
             self.pwp.coeffs, self.key = self.maximize_kh(params, self.key)
+            self.gamma = self.determine_equation_weight(grade_idx, gamma_init=self.gamma, criterion_low=0.1, criterion_high=10.0, max_trials=20, tol=1e-5)
             for iter in range(self.grade_epochs[grade_idx]):
-                if iter % self.f_adaptive_weight == 0:
-                    self.update_adaptive_weights(params=params)
-                    print(f"Grade {grade_idx}, Iter {iter}, lambda_ic: {self.lambda_ic:.8f}, lambda_bc: {self.lambda_bc:.8f}, lambda_r: {self.lambda_r:.8f}")
+                # if iter % self.f_adaptive_weight == 0:
+                #     self.update_adaptive_weights(params=params)
+                #     print(f"Grade {grade_idx}, Iter {iter}, lambda_ic: {self.lambda_ic:.8f}, lambda_bc: {self.lambda_bc:.8f}, lambda_r: {self.lambda_r:.8f}")
                 if iter % self.f_opt_kh == 0:
                     self.pwp.coeffs, self.key = self.maximize_kh(params, self.key)
-                loss_eqn, loss_ibc, params, opt_state = self.train_step(params, optimizar, opt_state)
+                loss_eqn, loss_ibc, params, opt_state = self.train_step(params, optimizer, opt_state)
                 if iter % 100 == 0:
                     print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.8f}, loss_ibc: {loss_ibc:.8f}")
                     wandb.log({f"grade_{grade_idx}_loss_eqn": loss_eqn, f"grade_{grade_idx}_loss_ibc": loss_ibc, "step": self.global_step + iter})
@@ -282,7 +295,7 @@ class MinMaxOptProb:
             self.maximize_kh = jit(self.maximize_kh_vec)
             params_last_k = [mlp.params for mlp in self.model.mlps[-self.k:]]
             self.opt_state_stage2 = self.optimizer_stage2.init(params_last_k)
-            optimizar = self.optimizer_stage2
+            optimizer = self.optimizer_stage2
             opt_state = self.opt_state_stage2
             self.pwp.coeffs, self.key = self.maximize_kh(params_last_k, self.key)
             for iter in range(self.epoch_stage2):
@@ -291,7 +304,7 @@ class MinMaxOptProb:
                     print(f"Stage 2, Iter {iter}, lambda_ic: {self.lambda_ic:.8f}, lambda_bc: {self.lambda_bc:.8f}, lambda_r: {self.lambda_r:.8f}")
                 if iter % 10 == 0:
                     self.pwp.coeffs, self.key = self.maximize_kh(params_last_k, self.key)
-                loss_eqn, loss_ibc, params_last_k, opt_state = self.train_step(params_last_k, optimizar, opt_state)
+                loss_eqn, loss_ibc, params_last_k, opt_state = self.train_step(params_last_k, optimizer, opt_state)
                 if iter % 100 == 0:
                     print(f"Stage 2, Iter {iter}, loss_eqn: {loss_eqn:.8f}, loss_ibc: {loss_ibc:.8f}")
                     wandb.log({"second_stage_loss_eqn": loss_eqn, "second_stage_loss_ibc": loss_ibc, "step": self.global_step + iter})
@@ -326,6 +339,77 @@ class MinMaxOptProb:
         self.lambda_ic = self.alpha * self.lambda_ic + (1 - self.alpha) * hat_lambda_ic
         self.lambda_bc = self.alpha * self.lambda_bc + (1 - self.alpha) * hat_lambda_bc
         self.lambda_r = self.alpha * self.lambda_r + (1 - self.alpha) * hat_lambda_r
+    
+    def determine_equation_weight(self, grade_idx, N0=1000, N1=None, eta=0.5, gamma_init=0.1, criterion_low=0.1, criterion_high=10.0, max_trials=20, tol=1e-5):
+        if N1 is None:
+            N1 = int(0.1 * N0)
+        gamma = gamma_init
+        optimizer = self.optimizer_list[grade_idx]
+        opt_state = self.opt_state_list[grade_idx]
+        initial_params = jax.tree_map(jnp.copy, self.model.mlps[grade_idx].params)
+        initial_opt_state = jax.tree_map(jax.numpy.copy, opt_state)
+
+        loss_data_fn = self.loss_fn_ibc
+        loss_eqn_fn = self.loss_fn_eqn
+        
+        for trial in range(max_trials):
+            # Reset params and opt_state for each pre-training
+            current_params = jax.tree_map(jax.numpy.copy, initial_params)
+            current_opt_state = jax.tree_map(jax.numpy.copy, initial_opt_state)
+        
+            # Define total loss for this gamma
+            def total_loss(params):
+                loss_data = loss_data_fn(params)
+                loss_eqn = loss_eqn_fn(params)
+                return (1 - gamma) * loss_data + gamma * loss_eqn, (loss_eqn, loss_data)
+            
+            # Collect loss history
+            loss_history_data = []
+            loss_history_eqn = []
+            self.pwp.coeffs, self.key = self.maximize_kh(current_params, self.key)
+            for i in range(N0):
+                if iter % self.f_opt_kh == 0:
+                    self.pwp.coeffs, self.key = self.maximize_kh(current_params, self.key)
+                (loss, (loss_data, loss_eqn)), grads = jax.value_and_grad(total_loss, has_aux=True)(current_params)
+                loss_history_data.append(loss_data)
+                loss_history_eqn.append(loss_eqn)
+                updates, current_opt_state = optimizer.update(grads, current_opt_state)
+                current_params = optax.apply_updates(current_params, updates)
+                if iter % 100 == 0:
+                    print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.8f}, loss_ibc: {loss_data:.8f}")
+
+            # Initial losses (at i=0)
+            L0_data = max(loss_history_data[:N1])
+            L0_eqn = max(loss_history_eqn[:N1])
+            
+            # Minimal losses in last N1 iterations
+            Lm_data = min(loss_history_data[-N1:])
+            Lm_eqn = min(loss_history_eqn[-N1:])
+            
+            # Convergence rates
+            conv_data = L0_data / Lm_data if Lm_data > 0 else float('inf')
+            conv_eqn = L0_eqn / Lm_eqn if Lm_eqn > 0 else float('inf')
+            
+            # Ratio Rc
+            Rc = conv_data / conv_eqn if conv_eqn != 0 else float('inf')
+            
+            # Check criterion
+            if criterion_low < Rc < criterion_high:
+                print(f"Optimal gamma found: {gamma} after {trial + 1} trials.")
+                return gamma
+            
+            # Update gamma
+            prev_gamma = gamma
+            gamma = gamma * (Rc ** eta)
+            print(f"Trial {trial + 1}: Rc = {Rc:.4f}, updating gamma to {gamma:.4f}")
+            
+            # Early stop if gamma stabilizes
+            if abs(gamma - prev_gamma) < tol:
+                print(f"gamma stabilized within tolerance {tol}.")
+                break
+        print(f"Max trials reached. Returning last gamma: {gamma}")
+        return gamma
+
 
     def save_model(self, model_path):
         os.makedirs(os.path.dirname(model_path), exist_ok=True)
