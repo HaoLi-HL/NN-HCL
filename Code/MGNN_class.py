@@ -3,7 +3,7 @@ from jax import random
 
 class MLP:
     """Simple MLP for approximating functions without Flax, adapted for variable input dimensions."""
-    def __init__(self, input_dim, hidden_dims=(64, 64), activation=jnp.tanh, lb=None, ub=None, normalize_input=True, seed=0):
+    def __init__(self, input_dim, hidden_dims=(64, 64), activation=jnp.tanh, lb=None, ub=None, normalize_input=True, seed=0, use_a=True):
         """
         Initialize the MLP with custom input dimension, hidden layers, and activation function.
 
@@ -15,6 +15,7 @@ class MLP:
             ub: Upper bound for input normalization (shape: (input_dim,)).
             normalize_input: Boolean to enable/disable input normalization.
             seed: Random seed for initialization.
+            use_a: Boolean to include trainable scalar 'a' (default: True).
         """
         self.input_dim = input_dim
         self.hidden_dims = hidden_dims
@@ -24,17 +25,19 @@ class MLP:
             self.lb = lb if lb is not None else jnp.zeros((input_dim,))
             self.ub = ub if ub is not None else jnp.ones((input_dim,))
         self.key = random.PRNGKey(seed)
+        self.use_a = use_a
         self.params = self.initialize_params()
 
     def initialize_params(self):
-        """Initialize parameters (weights, biases, and scalar 'a') using Xavier initialization."""
+        """Initialize parameters (weights, biases, and optionally scalar 'a') using Xavier initialization."""
         params = []
         num_layers = len(self.hidden_dims) + 1  # Hidden layers + output layer
         keys = random.split(self.key, num_layers)
         
-        # Initialize trainable scalar 'a'
-        a = jnp.sqrt(0.01)
-        params.append(a)
+        if self.use_a:
+            # Initialize trainable scalar 'a'
+            a = jnp.sqrt(0.01)
+            params.append(a)
         
         # Layers from input to output
         layers = [self.input_dim] + list(self.hidden_dims) + [1]  # Output dim = 1 for regression
@@ -55,7 +58,8 @@ class MLP:
         Compute the forward pass of the MLP.
 
         Args:
-            params: List containing [a, (W1, b1), (W2, b2), ..., (Wn, bn)].
+            params: List containing [a, (W1, b1), (W2, b2), ..., (Wn, bn)] if use_a is True,
+                    else [(W1, b1), (W2, b2), ..., (Wn, bn)].
             x: Input array of shape (batch_size, input_dim) or (input_dim,).
 
         Returns:
@@ -64,13 +68,21 @@ class MLP:
         if self.normalize_input:
             x = 2.0 * (x - self.lb) / (self.ub - self.lb) - 1.0
         
-        a = params[0]
-        for l in range(1, len(params) - 1):
-            W, b = params[l]
-            x = jnp.dot(x, W.T) + b
-            x = self.activation(10.0 * a * x)
+        if self.use_a:
+            a = params[0]
+            layer_params = params[1:]
+        else:
+            layer_params = params
         
-        W, b = params[-1]
+        for l in range(len(self.hidden_dims)):
+            W, b = layer_params[l]
+            x = jnp.dot(x, W.T) + b
+            if self.use_a:
+                x = self.activation(10.0 * a * x)
+            else:
+                x = self.activation(x)
+        
+        W, b = layer_params[-1]
         y = jnp.dot(x, W.T) + b
         out_wo_layer = x
         out = jnp.squeeze(y)
@@ -78,7 +90,6 @@ class MLP:
             return out, out_wo_layer
         else:
             return out
-    
 
     def __call__(self, params, x):
         """Convenience method to match original interface."""
@@ -86,7 +97,7 @@ class MLP:
 
 class MG_NN:
     """Multi-Grade Neural Network for regression, stacking shallow MLPs."""
-    def __init__(self, input_dim, hidden_dims_list, activation=jnp.tanh, lb=None, ub=None, seed=0):
+    def __init__(self, input_dim, hidden_dims_list, activation=jnp.tanh, lb=None, ub=None, seed=0, use_a=True):
         """
         Initialize the MG_NN with input dimension and a list of hidden dimensions for each grade.
 
@@ -106,6 +117,7 @@ class MG_NN:
         self.seed = seed
         self.mlps = []
         self.current_grade = 0
+        self.use_a=use_a
 
     def add_grade(self):
         """Add a new grade to the network."""
@@ -117,7 +129,8 @@ class MG_NN:
                       lb=self.lb,
                       ub=self.ub,
                       normalize_input=True,
-                      seed=self.seed)
+                      seed=self.seed,
+                      use_a=self.use_a)
         else:
             # Subsequent grades: input_dim is the last hidden dim of the previous grade, no normalization
             last_hidden_dim = self.hidden_dims_list[self.current_grade - 1][-1]
@@ -125,7 +138,8 @@ class MG_NN:
                       hidden_dims=self.hidden_dims_list[self.current_grade],
                       activation=self.activation,
                       normalize_input=False,
-                      seed=self.seed)
+                      seed=self.seed,
+                      use_a=self.use_a)
         self.mlps.append(mlp)
         self.current_grade += 1
 
@@ -140,12 +154,50 @@ class MG_NN:
             Scalar output representing the sum of all grades' predictions.
         """
         temp = x
-        sum_out = 0
+        sum_grade = 0
         for mlp in self.mlps:
             out, out_wo_layer = mlp.forward(mlp.params, temp, extra_output=True)
-            sum_out += out
+            sum_grade += out
             temp = out_wo_layer
-        return sum_out
+        return sum_grade
+    
+    def forward_with_params_list(self, params_list, x):
+        temp = x
+        sum_grade = 0
+        for i, params in enumerate(params_list):
+            mlp = self.mlps[i]
+            out, out_wo_layer = mlp.forward(params, temp, extra_output=True)
+            sum_grade += out
+            temp = out_wo_layer
+        return sum_grade
+    
+    def forward_with_params(self, params, x, grade_idx):
+        fixed_params = [self.mlps[i].params for i in range(grade_idx)]
+        params_list = fixed_params + [params]
+        return self.forward_with_params_list(params_list, x)
+
+    
+    def forward_with_params_last_k(self, params_last_k, x, k):
+        n = len(self.mlps)
+        fixed_params = [self.mlps[i].params for i in range(n - k)]
+        params_list = fixed_params + params_last_k
+        return self.forward_with_params_list(params_list, x)
+    
+    def forward_stage2(self, params_stage2, x):
+        temp = x
+        sum_grade = 0
+        for mlp in self.mlps[:-1]:
+            out, out_wo_layer = mlp.forward(mlp.params, temp, extra_output=True)
+            sum_grade += out
+            temp = out_wo_layer
+        temp = x
+        for i, params in enumerate(params_stage2):
+            mlp = self.mlps[i]
+            out, out_wo_layer = mlp.forward(params, temp, extra_output=True)
+            temp = out_wo_layer
+        return sum_grade + out
+
+
 
 # Example usage for a regression problem (to be implemented externally):
 # 1. Initialize MG_NN with input_dim=2 and hidden_dims_list=[(64,64), (32,32)]
