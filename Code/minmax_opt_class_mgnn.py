@@ -29,8 +29,8 @@ def pytree_l2_norm(pytree):
 class MinMaxOptProb:
     def __init__(self, N_t=10, N_x=10, lr_theta=0.01, hidden_dims_list=[(64, 64), (32, 32), (16, 16)], seed=0, sigma=0.1, N_perturb=5000, N_bc=100, N_ic=100,
                  t_min=0, t_max=1, x_min=0, x_max=1, k_h_rf_times=1, u0=None, u1=None, u2=None, lambda_bc_static=0.9, project="minmax_opt_mgnn_burgers",
-                 lambda_ic=10.0, lambda_bc=10.0, lambda_r=1.0, gamma=0.1,
-                 L1_regularization=1,
+                 lambda_ic=10.0, lambda_bc=10.0, lambda_r=1.0, gamma=0.2,
+                 L1_regularization=1, sampling_method='normal', notes='',
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  f_adaptive_weight=1000, f_opt_kh=10, nu=0.01, res_visc=None, res=None, use_loss_fn_elem_int=True, total_grade=3, k=2, use_a=True):
         self.pwp = PiecewiseLinearPolynomials(N_t, N_x, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, times=k_h_rf_times)
@@ -69,7 +69,9 @@ class MinMaxOptProb:
             self.loss_fn_eqn = self.loss_fn_elem_bdry
         
         self.L1_regularization = L1_regularization
+        self.sampling_method = sampling_method
         self.project = project
+        self.notes = notes
         self.run_name = f"grade_{self.total_grade}_k_{self.k}_opt_kh_{self.f_opt_kh}_N_perturb_{N_perturb}_nu_{self.nu}_L1_{self.L1_regularization}_seed_{seed}"
 
         # Initialize optimizers for each grade of the first stage
@@ -82,10 +84,11 @@ class MinMaxOptProb:
         for i in range(total_grade):
             self.model.add_grade()  # Add a new grade
             self.params_list.append(self.model.mlps[i].params)
-            lr = optax.schedules.constant_schedule(init_lrs[i])
+            # lr = optax.schedules.constant_schedule(init_lrs[i])
             # lr = optax.schedules.exponential_decay(init_value=init_lrs[i], transition_steps=grade_epochs[i], decay_rate=decay_rates[i])
-            # lr = optax.schedules.warmup_exponential_decay_schedule(init_value=0, peak_value=init_lrs[i], warmup_steps=200, transition_steps=grade_epochs[i], decay_rate=decay_rates[i], end_value=1e-6)
-            # lr = optax.schedules.warmup_cosine_decay_schedule(init_value=1e-6, peak_value=init_lrs[i], warmup_steps=200, decay_steps=grade_epochs[i], end_value=1e-6)
+            # lr = optax.schedules.warmup_exponential_decay_schedule(init_value=0, peak_value=init_lrs[i], warmup_steps=100, transition_steps=grade_epochs[i], decay_rate=decay_rates[i], end_value=1e-6)
+            lr = optax.schedules.warmup_cosine_decay_schedule(init_value=1e-6, peak_value=init_lrs[i], warmup_steps=100, decay_steps=grade_epochs[i], end_value=1e-6)
+            # lr = optax.schedules.cosine_decay_schedule(init_value=init_lrs[i], decay_steps=grade_epochs[i])
             self.lr_schedulers.append(lr)
             self.optimizer_list.append(optax.adam(self.lr_schedulers[i]))
         self.opt_state_list = [opt.init(self.model.mlps[i].params) for i, opt in enumerate(self.optimizer_list)]
@@ -141,7 +144,11 @@ class MinMaxOptProb:
         init_coeffs_all = jnp.linalg.solve(A_all, u_values_all.reshape(Nt, 3, 1)).squeeze(-1)
         key, current_key = jax.random.split(current_key)
         keys = jax.random.split(key, Nt)
-        perturbations_all = vmap(lambda k: self.sigma * jax.random.normal(k, (self.N_perturb, 3)))(keys)
+        if self.sampling_method == 'normal':
+            perturbations_all = vmap(lambda k: self.sigma * jax.random.normal(k, (self.N_perturb, 3)))(keys)
+        elif self.sampling_method == 'uniform':
+            perturbations_all = vmap(lambda k: self.sigma * jax.random.uniform(k, (self.N_perturb, 3), minval=-1, maxval=1))(keys)
+        
         perturbed_coeffs_all = init_coeffs_all[:, None, :] + perturbations_all
         losses_all = vmap(self.loss_kh_per_elem, in_axes=(0, 0, None))(jnp.arange(Nt), perturbed_coeffs_all, params)
         best_indices = jnp.argmax(losses_all, axis=1)
@@ -249,19 +256,20 @@ class MinMaxOptProb:
         print("\nStarting Train Stage with MGDL")
         start_time = time.perf_counter()
         self.global_step = 0
-        wandb.init(project=self.project, name=self.run_name, config={
-            "total_grade": self.total_grade,
-            "k": self.k,
-            "hidden_dims_list": self.model.hidden_dims_list,
-            "lrs": self.init_lrs,
-            "epochs": self.grade_epochs,
-            "decay_rates": self.decay_rates,
-            "lr_2ndstage": self.init_lr_stage2,
-            "epoch_2ndstage": self.epoch_stage2,
-            "decay_rate": self.decay_rate_stage2,
-            "f_adaptive_weight": self.f_adaptive_weight,
-            "f_opt_kh" : self.f_opt_kh,
-            })
+        wandb.init(project=self.project, name=self.run_name, notes=self.notes,
+                   config={
+                       "total_grade": self.total_grade,
+                        "k": self.k,
+                        "hidden_dims_list": self.model.hidden_dims_list,
+                        "lrs": self.init_lrs,
+                        "epochs": self.grade_epochs,
+                        "decay_rates": self.decay_rates,
+                        "lr_2ndstage": self.init_lr_stage2,
+                        "epoch_2ndstage": self.epoch_stage2,
+                        "decay_rate": self.decay_rate_stage2,
+                        "f_adaptive_weight": self.f_adaptive_weight,
+                        "f_opt_kh" : self.f_opt_kh,
+                        })
 
         # Stage 1: Sequential Grade Training
         print("\nStage 1: Sequential Grade Training")
@@ -273,7 +281,7 @@ class MinMaxOptProb:
             optimizer = self.optimizer_list[grade_idx]
             opt_state = self.opt_state_list[grade_idx]
             self.pwp.coeffs, self.key = self.maximize_kh(params, self.key)
-            self.gamma = self.determine_equation_weight(grade_idx, gamma_init=self.gamma, criterion_low=0.1, criterion_high=10.0, max_trials=20, tol=1e-5)
+            self.gamma = self.determine_equation_weight(grade_idx, gamma_init=self.gamma)
             for iter in range(self.grade_epochs[grade_idx]):
                 # if iter % self.f_adaptive_weight == 0:
                 #     self.update_adaptive_weights(params=params)
@@ -340,7 +348,7 @@ class MinMaxOptProb:
         self.lambda_bc = self.alpha * self.lambda_bc + (1 - self.alpha) * hat_lambda_bc
         self.lambda_r = self.alpha * self.lambda_r + (1 - self.alpha) * hat_lambda_r
     
-    def determine_equation_weight(self, grade_idx, N0=1000, N1=None, eta=0.5, gamma_init=0.1, criterion_low=0.1, criterion_high=10.0, max_trials=20, tol=1e-5):
+    def determine_equation_weight(self, grade_idx, N0=1000, N1=None, eta=0.2, gamma_init=0.1, criterion_low=0.1, criterion_high=10.0, max_trials=20, tol=1e-5):
         if N1 is None:
             N1 = int(0.1 * N0)
         gamma = gamma_init
@@ -353,6 +361,7 @@ class MinMaxOptProb:
         loss_eqn_fn = self.loss_fn_eqn
         
         for trial in range(max_trials):
+            print(f"The initial gamma of {trial + 1}th trials is {gamma}.")
             # Reset params and opt_state for each pre-training
             current_params = jax.tree_map(jax.numpy.copy, initial_params)
             current_opt_state = jax.tree_map(jax.numpy.copy, initial_opt_state)
@@ -367,24 +376,26 @@ class MinMaxOptProb:
             loss_history_data = []
             loss_history_eqn = []
             self.pwp.coeffs, self.key = self.maximize_kh(current_params, self.key)
-            for i in range(N0):
-                if iter % self.f_opt_kh == 0:
-                    self.pwp.coeffs, self.key = self.maximize_kh(current_params, self.key)
-                (loss, (loss_data, loss_eqn)), grads = jax.value_and_grad(total_loss, has_aux=True)(current_params)
+            for iter in range(N0):
+                (loss, (loss_eqn, loss_data)), grads = jax.value_and_grad(total_loss, has_aux=True)(current_params)
                 loss_history_data.append(loss_data)
                 loss_history_eqn.append(loss_eqn)
                 updates, current_opt_state = optimizer.update(grads, current_opt_state)
                 current_params = optax.apply_updates(current_params, updates)
+                if iter % self.f_opt_kh == 0:
+                    self.pwp.coeffs, self.key = self.maximize_kh(current_params, self.key)
+                loss_eqn = loss_eqn_fn(current_params)
+                loss_data = loss_data_fn(current_params)
                 if iter % 100 == 0:
-                    print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.8f}, loss_ibc: {loss_data:.8f}")
+                    print(f"Grade {grade_idx}, Gamma {self.gamma}, Iter {iter}, loss_eqn: {loss_eqn:.8f}, loss_ibc: {loss_data:.8f}")
 
             # Initial losses (at i=0)
-            L0_data = max(loss_history_data[:N1])
-            L0_eqn = max(loss_history_eqn[:N1])
+            L0_data = max(loss_history_data[:2*N1])
+            L0_eqn = max(loss_history_eqn[:2*N1])
             
             # Minimal losses in last N1 iterations
-            Lm_data = min(loss_history_data[-N1:])
-            Lm_eqn = min(loss_history_eqn[-N1:])
+            Lm_data = min(loss_history_data[N1:])
+            Lm_eqn = min(loss_history_eqn[N1:])
             
             # Convergence rates
             conv_data = L0_data / Lm_data if Lm_data > 0 else float('inf')
@@ -392,6 +403,7 @@ class MinMaxOptProb:
             
             # Ratio Rc
             Rc = conv_data / conv_eqn if conv_eqn != 0 else float('inf')
+            print(f"Trial {trial + 1}: conv_data = {conv_data:.4f}, conv_eqn = {conv_eqn:.4f}, Rc = {Rc:.4f}")
             
             # Check criterion
             if criterion_low < Rc < criterion_high:
@@ -401,7 +413,7 @@ class MinMaxOptProb:
             # Update gamma
             prev_gamma = gamma
             gamma = gamma * (Rc ** eta)
-            print(f"Trial {trial + 1}: Rc = {Rc:.4f}, updating gamma to {gamma:.4f}")
+            print(f"Updating gamma to {gamma:.4f}")
             
             # Early stop if gamma stabilizes
             if abs(gamma - prev_gamma) < tol:
