@@ -28,7 +28,7 @@ def pytree_l2_norm(pytree):
 class MinMaxOptProb:
     def __init__(self, N_t=10, N_x=10, lr_theta=0.01, hidden_dims_list=[(64, 64), (32, 32), (16, 16)], seed=0, sigma=0.1, N_perturb=5000, N_bc=100, N_ic=100,
                  t_min=0, t_max=1, x_min=0, x_max=1, k_h_rf_times=1, u0=None, u1=None, u2=None, lambda_bc_static=0.9, project="minmax_opt_mgnn_burgers",
-                 lambda_ic=10.0, lambda_bc=10.0, lambda_r=1.0, gamma=0.2,
+                 lambda_ic=10.0, lambda_bc=10.0, lambda_r=1.0, gamma=0.3,
                  L1_regularization=1, sampling_method='normal', notes='',
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  f_adaptive_weight=1000, f_opt_kh=10, nu=0.01, res_visc=None, res=None, use_loss_fn_elem_int=True, total_grade=3, k=2, use_a=True):
@@ -360,7 +360,7 @@ class MinMaxOptProb:
         loss_eqn_fn = self.loss_fn_eqn
         
         for trial in range(max_trials):
-            print(f"The initial gamma of {trial + 1}th trials is {gamma}.")
+            print(f"The gamma of {trial + 1}th trials is {gamma}.")
             # Reset params and opt_state for each pre-training
             current_params = jax.tree_util.tree_map(jax.numpy.copy, initial_params)
             current_opt_state = jax.tree_util.tree_map(jax.numpy.copy, initial_opt_state)
