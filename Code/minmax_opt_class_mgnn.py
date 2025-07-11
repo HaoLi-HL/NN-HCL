@@ -201,7 +201,7 @@ class MinMaxOptProb:
         normals_per_edge = self.pwp.normals
 
         def compute_edge_integral(points, weights, normal, p_coeffs_K):
-            u_theta = self.u_eval(points)
+            u_theta = self.u_eval(params, points)
             k_h = (p_coeffs_K[0] + 
                    p_coeffs_K[1] * points[:, 0] + 
                    p_coeffs_K[2] * points[:, 1])
@@ -241,7 +241,7 @@ class MinMaxOptProb:
     
     def loss_fn(self, params):
         loss_ibc = self.loss_fn_ibc(params)
-        loss_eqn = self.loss_fn_elem_int(params)
+        loss_eqn = self.loss_fn_eqn(params)
         total_loss = self.gamma * loss_eqn + (1 - self.gamma) * loss_ibc
         return total_loss, (loss_eqn, loss_ibc)
 
@@ -347,14 +347,14 @@ class MinMaxOptProb:
         self.lambda_bc = self.alpha * self.lambda_bc + (1 - self.alpha) * hat_lambda_bc
         self.lambda_r = self.alpha * self.lambda_r + (1 - self.alpha) * hat_lambda_r
     
-    def determine_equation_weight(self, grade_idx, N0=1000, N1=None, eta=0.2, gamma_init=0.1, criterion_low=0.1, criterion_high=10.0, max_trials=20, tol=1e-5):
+    def determine_equation_weight(self, grade_idx, N0=1000, N1=None, eta=0.1, gamma_init=0.1, criterion_low=0.1, criterion_high=10.0, max_trials=20, tol=1e-5):
         if N1 is None:
             N1 = int(0.1 * N0)
         gamma = gamma_init
         optimizer = self.optimizer_list[grade_idx]
         opt_state = self.opt_state_list[grade_idx]
         initial_params = jax.tree_util.tree_map(jnp.copy, self.model.mlps[grade_idx].params)
-        initial_opt_state = jax.tree_util.tree_map(jax.numpy.copy, opt_state)
+        initial_opt_state = jax.tree_util.tree_map(jnp.copy, opt_state)
 
         loss_data_fn = self.loss_fn_ibc
         loss_eqn_fn = self.loss_fn_eqn
@@ -362,8 +362,8 @@ class MinMaxOptProb:
         for trial in range(max_trials):
             print(f"The gamma of {trial + 1}th trials is {gamma}.")
             # Reset params and opt_state for each pre-training
-            current_params = jax.tree_util.tree_map(jax.numpy.copy, initial_params)
-            current_opt_state = jax.tree_util.tree_map(jax.numpy.copy, initial_opt_state)
+            current_params = jax.tree_util.tree_map(jnp.copy, initial_params)
+            current_opt_state = jax.tree_util.tree_map(jnp.copy, initial_opt_state)
         
             # Define total loss for this gamma
             def total_loss(params):
@@ -386,7 +386,7 @@ class MinMaxOptProb:
                 loss_eqn = loss_eqn_fn(current_params)
                 loss_data = loss_data_fn(current_params)
                 if iter % 100 == 0:
-                    print(f"Grade {grade_idx}, Gamma {self.gamma}, Iter {iter}, loss_eqn: {loss_eqn:.8f}, loss_ibc: {loss_data:.8f}")
+                    print(f"Grade {grade_idx}, Gamma {gamma}, Iter {iter}, loss_eqn: {loss_eqn:.8f}, loss_ibc: {loss_data:.8f}")
 
             # Initial losses (at i=0)
             L0_data = max(loss_history_data[:2*N1])

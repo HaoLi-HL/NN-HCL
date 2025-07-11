@@ -18,10 +18,10 @@ def plot_loss_history(loss_int, loss_bc, title):
     plt.show()
 
 # Function to plot u_theta
-def plot_u_theta(model, params=None, M_t=100, M_x=100, t_min=0.0, t_max=1.0, x_min=0.0, x_max=1.0):
+def plot_u_theta(model, params=None, M_t=100, M_x=100, t_min=0.0, t_max=1.0, x_min=0.0, x_max=1.0, ts=None):
     """
     Plot the neural network function u_theta over a specified domain [t_min, t_max] x [x_min, x_max],
-    and include a 1D plot of u_theta at t = t_max.
+    and include a 1D plot of u_theta at t = t_max. Additionally, plot separate 1D snapshots for each timestamp in ts if provided.
 
     Args:
         model: Flax model instance representing u_theta.
@@ -32,7 +32,11 @@ def plot_u_theta(model, params=None, M_t=100, M_x=100, t_min=0.0, t_max=1.0, x_m
         t_max: Maximum value for t (default: 1.0).
         x_min: Minimum value for x (default: 0.0).
         x_max: Maximum value for x (default: 1.0).
+        ts: List or array of timestamps for which to plot individual 1D snapshots (default: None).
     """
+    if ts is None:
+        ts = []
+
     # Create a grid for t and x over the specified ranges
     t_grid = jnp.linspace(t_min, t_max, M_t)
     x_grid = jnp.linspace(x_min, x_max, M_x)
@@ -48,7 +52,7 @@ def plot_u_theta(model, params=None, M_t=100, M_x=100, t_min=0.0, t_max=1.0, x_m
         u_values = model(params, tx_points)  # Shape: (M_t * M_x, 1)
     u_values = u_values.reshape(M_t, M_x)  # Reshape to (M_t, M_x)
 
-    # Create figure with two subplots
+    # Create figure with two subplots for the main plot
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
 
     # 2D color mesh plot
@@ -64,10 +68,22 @@ def plot_u_theta(model, params=None, M_t=100, M_x=100, t_min=0.0, t_max=1.0, x_m
     ax2.set_ylabel('$u_\\theta(t_{max}, x)$')
     ax2.set_title(f'Neural Network Function at t = {t_max}')
 
-    # Adjust layout and display
+    # Adjust layout and display the main plot
     plt.tight_layout()
     plt.show()
 
+    # Plot separate figures for each timestamp in ts
+    for t_val in ts:
+        # Find the closest index in t_grid
+        idx = jnp.argmin(jnp.abs(t_grid - t_val))
+        # Create a new figure for the snapshot
+        fig, ax = plt.subplots(1, 1, figsize=(10, 4))
+        ax.plot(x_grid, u_values[idx, :])
+        ax.set_xlabel('x')
+        ax.set_ylabel('$u_\\theta(t, x)$')
+        ax.set_title(f'Neural Network Function at t = {t_val:.2f} (closest t = {t_grid[idx]:.2f})')
+        plt.tight_layout()
+        plt.show()
 import matplotlib.pyplot as plt
 import jax.numpy as jnp
 from jax import vmap
