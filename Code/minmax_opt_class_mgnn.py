@@ -80,7 +80,7 @@ class MinMaxOptProb:
         self.optimizer_list = []
         self.params_list = []
         self.lr_schedulers = []
-        for i in range(total_grade):
+        for i in range(self.total_grade):
             self.model.add_grade()  # Add a new grade
             self.params_list.append(self.model.mlps[i].params)
             # lr = optax.schedules.constant_schedule(init_lrs[i])
@@ -251,24 +251,24 @@ class MinMaxOptProb:
         params = optax.apply_updates(params, updates)
         return all_losses[0], all_losses[1], params, opt_state
 
-    def train_process(self, save_model=True):
+    def train_process_stage1(self, save_model=True):
         print("\nStarting Train Stage with MGDL")
         start_time = time.perf_counter()
         self.global_step = 0
         wandb.init(project=self.project, name=self.run_name, notes=self.notes,
                    config={
-                       "total_grade": self.total_grade,
-                        "k": self.k,
-                        "hidden_dims_list": self.model.hidden_dims_list,
-                        "lrs": self.init_lrs,
-                        "epochs": self.grade_epochs,
-                        "decay_rates": self.decay_rates,
-                        "lr_2ndstage": self.init_lr_stage2,
-                        "epoch_2ndstage": self.epoch_stage2,
-                        "decay_rate": self.decay_rate_stage2,
-                        "f_adaptive_weight": self.f_adaptive_weight,
-                        "f_opt_kh" : self.f_opt_kh,
-                        })
+                    "total_grade": self.total_grade,
+                    "k": self.k,
+                    "hidden_dims_list": self.model.hidden_dims_list,
+                    "lrs": self.init_lrs,
+                    "epochs": self.grade_epochs,
+                    "decay_rates": self.decay_rates,
+                    "lr_2ndstage": self.init_lr_stage2,
+                    "epoch_2ndstage": self.epoch_stage2,
+                    "decay_rate": self.decay_rate_stage2,
+                    "f_adaptive_weight": self.f_adaptive_weight,
+                    "f_opt_kh" : self.f_opt_kh,
+                    })
 
         # Stage 1: Sequential Grade Training
         print("\nStage 1: Sequential Grade Training")
@@ -291,12 +291,19 @@ class MinMaxOptProb:
                 if iter % 100 == 0:
                     print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.8f}, loss_ibc: {loss_ibc:.8f}")
                     wandb.log({f"grade_{grade_idx}_loss_eqn": loss_eqn, f"grade_{grade_idx}_loss_ibc": loss_ibc, "step": self.global_step + iter})
-                self.model.mlps[grade_idx].params = params      
+                    self.model.mlps[grade_idx].params = params
             self.opt_state_list[grade_idx] = opt_state
             self.global_step += self.grade_epochs[grade_idx]
+        end_time = time.perf_counter()
+        train_total_time = end_time - start_time
+        print(f"Train time for stage1: {train_total_time:.8f} seconds")
+        print(f"Train average time per iteration: {train_total_time / sum(self.grade_epochs):.9e} seconds")
 
+    def train_process_stage2(self, save_model=True):
         # Stage 2: Refinement of Last k Grades
         if self.k > 0 and self.k <= self.total_grade:
+            start_time = time.perf_counter()
+            self.gamma = self.determine_equation_weight(gamma_init=self.gamma)
             print(f"\nStage 2: Refining Last {self.k} Grades")
             self.gen_funcs()
             self.maximize_kh = jit(self.maximize_kh_vec)
@@ -309,7 +316,7 @@ class MinMaxOptProb:
                 if iter % self.f_adaptive_weight == 0:
                     self.update_adaptive_weights(params=params_last_k)
                     print(f"Stage 2, Iter {iter}, lambda_ic: {self.lambda_ic:.8f}, lambda_bc: {self.lambda_bc:.8f}, lambda_r: {self.lambda_r:.8f}")
-                if iter % 10 == 0:
+                if iter % self.f_opt_kh == 0:
                     self.pwp.coeffs, self.key = self.maximize_kh(params_last_k, self.key)
                 loss_eqn, loss_ibc, params_last_k, opt_state = self.train_step(params_last_k, optimizer, opt_state)
                 if iter % 100 == 0:
@@ -319,17 +326,18 @@ class MinMaxOptProb:
                 mlp.params = p
             self.global_step += self.epoch_stage2
 
-        end_time = time.perf_counter()
-        train_total_time = end_time - start_time
-        print(f"Train total time: {train_total_time:.8f} seconds")
-        print(f"Train average time per iteration: {train_total_time / (sum(self.grade_epochs) + self.epoch_stage2):.9e} seconds")
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            end_time = time.perf_counter()
+            train_total_time = end_time - start_time
+            print(f"Train time for stage2: {train_total_time:.8f} seconds")
+            print(f"Train average time per iteration: {train_total_time / self.epoch_stage2:.9e} seconds")
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            if save_model:
+                model_path = os.path.join('data', f'train_model_{self.run_name}_{timestamp}.pkl')
+                self.save_model(model_path)
+                print(f"Train model saved to {model_path}")
 
         wandb.finish()
-        if save_model:
-            model_path = os.path.join('data', f'train_model_{timestamp}.pkl')
-            self.save_model(model_path)
-            print(f"Train model saved to {model_path}")
+        
         
     def update_adaptive_weights(self, params):
         grad_loss_ic = grad(self.loss_fn_ic)(params)
@@ -347,15 +355,21 @@ class MinMaxOptProb:
         self.lambda_bc = self.alpha * self.lambda_bc + (1 - self.alpha) * hat_lambda_bc
         self.lambda_r = self.alpha * self.lambda_r + (1 - self.alpha) * hat_lambda_r
     
-    def determine_equation_weight(self, grade_idx, N0=1000, N1=None, eta=0.1, gamma_init=0.1, criterion_low=0.1, criterion_high=10.0, max_trials=20, tol=1e-5):
+    def determine_equation_weight(self, grade_idx=None, N0=1000, N1=None, eta=0.1, gamma_init=0.1, criterion_low=0.1, criterion_high=10.0, max_trials=20, tol=1e-5):
         if N1 is None:
             N1 = int(0.1 * N0)
         gamma = gamma_init
-        optimizer = self.optimizer_list[grade_idx]
-        opt_state = self.opt_state_list[grade_idx]
-        initial_params = jax.tree_util.tree_map(jnp.copy, self.model.mlps[grade_idx].params)
-        initial_opt_state = jax.tree_util.tree_map(jnp.copy, opt_state)
-
+        if grade_idx is not None:
+            optimizer = self.optimizer_list[grade_idx]
+            opt_state = self.opt_state_list[grade_idx]
+            initial_params = jax.tree_util.tree_map(jnp.copy, self.model.mlps[grade_idx].params)
+            initial_opt_state = jax.tree_util.tree_map(jnp.copy, opt_state)
+        else:
+            optimizer = self.optimizer_stage2
+            opt_state = self.opt_state_stage2
+            initial_params = jax.tree_util.tree_map(jnp.copy, self.params_stage2)
+            initial_opt_state = jax.tree_util.tree_map(jnp.copy, opt_state)
+        
         loss_data_fn = self.loss_fn_ibc
         loss_eqn_fn = self.loss_fn_eqn
         
@@ -421,7 +435,6 @@ class MinMaxOptProb:
         print(f"Max trials reached. Returning last gamma: {gamma}")
         return gamma
 
-
     def save_model(self, model_path):
         os.makedirs(os.path.dirname(model_path), exist_ok=True)
         save_dict = {
@@ -433,7 +446,7 @@ class MinMaxOptProb:
         }
         with open(model_path, 'wb') as f:
             pickle.dump(save_dict, f)
-
+   
     def load_model(self, model_path):
         with open(model_path, 'rb') as f:
             loaded_data = pickle.load(f)
