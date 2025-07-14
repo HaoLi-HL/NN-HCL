@@ -31,7 +31,7 @@ class MinMaxOptProb:
                  lambda_ic=10.0, lambda_bc=10.0, lambda_r=1.0, gamma=0.3,
                  L1_regularization=1, sampling_method='normal', notes='',
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
-                 f_adaptive_weight=1000, f_opt_kh=10, nu=0.01, res_visc=None, res=None, use_loss_fn_elem_int=True, total_grade=3, k=2, use_a=True):
+                 f_adaptive_weight=10000, f_opt_kh=10, nu=0.01, res_visc=None, res=None, use_loss_fn_elem_int=True, total_grade=3, k=2, use_a=True):
         self.pwp = PiecewiseLinearPolynomials(N_t, N_x, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, times=k_h_rf_times)
         self.lr_theta = lr_theta
         self.lb = jnp.array([t_min, x_min])
@@ -98,6 +98,7 @@ class MinMaxOptProb:
         lr_stage2 = optax.exponential_decay(init_value=init_lr_stage2, transition_steps=epoch_stage2, decay_rate=decay_rate_stage2, end_value=1e-6)
         self.optimizer_stage2 = optax.adam(lr_stage2)
         self.opt_state_stage2 = None  # To be initialized later
+
 
         self.gen_funcs()
 
@@ -280,11 +281,10 @@ class MinMaxOptProb:
             optimizer = self.optimizer_list[grade_idx]
             opt_state = self.opt_state_list[grade_idx]
             self.pwp.coeffs, self.key = self.maximize_kh(params, self.key)
-            self.gamma = self.determine_equation_weight(grade_idx, gamma_init=self.gamma)
             for iter in range(self.grade_epochs[grade_idx]):
-                # if iter % self.f_adaptive_weight == 0:
-                #     self.update_adaptive_weights(params=params)
-                #     print(f"Grade {grade_idx}, Iter {iter}, lambda_ic: {self.lambda_ic:.8f}, lambda_bc: {self.lambda_bc:.8f}, lambda_r: {self.lambda_r:.8f}")
+                if iter % self.f_adaptive_weight == 0:
+                    self.gamma = self.determine_equation_weight(grade_idx, gamma_init=self.gamma)
+                    print(f"Stage 2, Iter {iter}, Gamma: {self.gamma:.8f}")
                 if iter % self.f_opt_kh == 0:
                     self.pwp.coeffs, self.key = self.maximize_kh(params, self.key)
                 loss_eqn, loss_ibc, params, opt_state = self.train_step(params, optimizer, opt_state)
@@ -314,8 +314,8 @@ class MinMaxOptProb:
             self.pwp.coeffs, self.key = self.maximize_kh(params_last_k, self.key)
             for iter in range(self.epoch_stage2):
                 if iter % self.f_adaptive_weight == 0:
-                    self.update_adaptive_weights(params=params_last_k)
-                    print(f"Stage 2, Iter {iter}, lambda_ic: {self.lambda_ic:.8f}, lambda_bc: {self.lambda_bc:.8f}, lambda_r: {self.lambda_r:.8f}")
+                    self.gamma = self.determine_equation_weight(gamma_init=self.gamma)
+                    print(f"Stage 2, Iter {iter}, Gamma: {self.gamma:.8f}")
                 if iter % self.f_opt_kh == 0:
                     self.pwp.coeffs, self.key = self.maximize_kh(params_last_k, self.key)
                 loss_eqn, loss_ibc, params_last_k, opt_state = self.train_step(params_last_k, optimizer, opt_state)
