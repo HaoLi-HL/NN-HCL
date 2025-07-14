@@ -159,18 +159,18 @@ class MinMaxOptProb:
         quad_weights = self.pwp.quad_weights.flatten()
         u_quad = self.u_eval(params, quad_points)
         grad_u_tx = self.grad_u(params, quad_points)
-        u_t, u_x = grad_u_tx[:, 0], grad_u_tx[:, 1]
-        # if self.L1_regularization > 0:
-        #     hessian_u_tx = self.hessian_u(params, quad_points)
-        #     u_xx = hessian_u_tx[:, 1, 1].flatten()
-        #     residual_visc = self.res_visc(u_quad, u_t, u_x, u_xx, self.nu)
+        u_t, u_x = grad_u_tx[:, 0], grad_u_tx[:, 1]            
         residual = self.res(u_quad, u_t, u_x).flatten()
         p_coeffs_quad = self.pwp.coeffs[self.pwp.element_indices]
         k_h_quad = p_coeffs_quad[:, 0] + p_coeffs_quad[:, 1] * quad_points[:, 0] + p_coeffs_quad[:, 2] * quad_points[:, 1]
         integrand = residual * jnp.sign(u_quad - k_h_quad)
-        # if self.L1_regularization > 0:
-        #     integrand += self.L1_regularization * jnp.abs(self.h * residual_visc)
-        # integrand = residual * jnp.sign(u_quad - k_h_quad) + jnp.abs(self.h*residual_visc)
+
+        if self.L1_regularization > 0:
+            hessian_u_tx = self.hessian_u(params, quad_points)
+            u_xx = hessian_u_tx[:, 1, 1].flatten()
+            residual_visc = self.res_visc(u_quad, u_t, u_x, u_xx, self.nu)
+            integrand += self.L1_regularization * jnp.abs(self.h * residual_visc)
+            
         interior_loss = jnp.dot(quad_weights, integrand)
         return interior_loss
     
@@ -244,7 +244,7 @@ class MinMaxOptProb:
         loss_eqn = self.loss_fn_eqn(params)
         total_loss = self.gamma * loss_eqn + (1 - self.gamma) * loss_ibc
         return total_loss, (loss_eqn, loss_ibc)
-
+    
     def train_step(self, params, optimizer, opt_state):
         (_, all_losses), grads = jax.value_and_grad(self.loss_fn, argnums=0, has_aux=True)(params)
         updates, opt_state = optimizer.update(grads, opt_state)
