@@ -403,8 +403,8 @@ class MinMaxOptProb:
                     print(f"Grade {grade_idx}, Gamma {gamma}, Iter {iter}, loss_eqn: {loss_eqn:.8f}, loss_ibc: {loss_data:.8f}")
 
             # Initial losses (at i=0)
-            L0_data = max(loss_history_data[:2*N1])
-            L0_eqn = max(loss_history_eqn[:2*N1])
+            L0_data = max(loss_history_data[:N1])
+            L0_eqn = max(loss_history_eqn[:N1])
             
             # Minimal losses in last N1 iterations
             Lm_data = min(loss_history_data[N1:])
