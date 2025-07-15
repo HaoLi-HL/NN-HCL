@@ -1,0 +1,61 @@
+_wandb:
+    value:
+        cli_version: 0.20.1
+        m: []
+        python_version: 3.10.18
+        t:
+            "1":
+                - 12
+                - 45
+            "2":
+                - 12
+                - 45
+            "3":
+                - 2
+                - 13
+                - 16
+                - 55
+            "4": 3.10.18
+            "5": 0.20.1
+            "8":
+                - 1
+            "12": 0.20.1
+            "13": darwin-arm64
+decay_rate:
+    value: 0.001
+decay_rates:
+    value:
+        - 0.001
+        - 0.001
+        - 0.001
+        - 0.001
+epoch_2ndstage:
+    value: 100000
+epochs:
+    value:
+        - 100000
+        - 100000
+        - 100000
+        - 100000
+f_adaptive_weight:
+    value: 1000
+f_opt_kh:
+    value: 1
+hidden_dims_list:
+    value:
+        - - 40
+          - 40
+          - 40
+          - 40
+k:
+    value: 0
+lr_2ndstage:
+    value: 0.001
+lrs:
+    value:
+        - 0.001
+        - 0.001
+        - 0.001
+        - 0.001
+total_grade:
+    value: 1
