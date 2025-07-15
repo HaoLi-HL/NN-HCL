@@ -276,6 +276,8 @@ class MinMaxOptProb:
             print(f"\nTraining Grade {grade_idx}")
             self.gen_funcs(grade_idx)
             self.maximize_kh = jit(self.maximize_kh_vec)
+            loss_eqn_fn = jit(self.loss_fn_eqn)
+            loss_data_fn = jit(self.loss_fn_ibc)
             params = self.model.mlps[grade_idx].params
             optimizer = self.optimizer_list[grade_idx]
             opt_state = self.opt_state_list[grade_idx]
@@ -284,9 +286,11 @@ class MinMaxOptProb:
                 if iter % self.f_adaptive_weight == 0:
                     self.gamma = self.determine_equation_weight(grade_idx, gamma_init=self.gamma)
                     print(f"Stage 2, Iter {iter}, Gamma: {self.gamma:.8f}")
+                loss_eqn, loss_ibc, params, opt_state = self.train_step(params, optimizer, opt_state)
                 if iter % self.f_opt_kh == 0:
                     self.pwp.coeffs, self.key = self.maximize_kh(params, self.key)
-                loss_eqn, loss_ibc, params, opt_state = self.train_step(params, optimizer, opt_state)
+                loss_eqn = loss_eqn_fn(params)
+                loss_data = loss_data_fn(params)
                 if iter % 100 == 0:
                     print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.8f}, loss_ibc: {loss_ibc:.8f}")
                     wandb.log({f"grade_{grade_idx}_loss_eqn": loss_eqn, f"grade_{grade_idx}_loss_ibc": loss_ibc, "step": self.global_step + iter})
@@ -307,6 +311,8 @@ class MinMaxOptProb:
             print(f"\nStage 2: Refining Last {self.k} Grades")
             self.gen_funcs()
             self.maximize_kh = jit(self.maximize_kh_vec)
+            loss_eqn_fn = jit(self.loss_fn_eqn)
+            loss_data_fn = jit(self.loss_fn_ibc)
             params_last_k = [mlp.params for mlp in self.model.mlps[-self.k:]]
             self.opt_state_stage2 = self.optimizer_stage2.init(params_last_k)
             optimizer = self.optimizer_stage2
@@ -316,9 +322,11 @@ class MinMaxOptProb:
                 if iter % self.f_adaptive_weight == 0:
                     self.gamma = self.determine_equation_weight(gamma_init=self.gamma)
                     print(f"Stage 2, Iter {iter}, Gamma: {self.gamma:.8f}")
+                loss_eqn, loss_ibc, params_last_k, opt_state = self.train_step(params_last_k, optimizer, opt_state)
                 if iter % self.f_opt_kh == 0:
                     self.pwp.coeffs, self.key = self.maximize_kh(params_last_k, self.key)
-                loss_eqn, loss_ibc, params_last_k, opt_state = self.train_step(params_last_k, optimizer, opt_state)
+                loss_eqn = loss_eqn_fn(params_last_k)
+                loss_data = loss_data_fn(params_last_k)
                 if iter % 100 == 0:
                     print(f"Stage 2, Iter {iter}, loss_eqn: {loss_eqn:.8f}, loss_ibc: {loss_ibc:.8f}")
                     wandb.log({"second_stage_loss_eqn": loss_eqn, "second_stage_loss_ibc": loss_ibc, "step": self.global_step + iter})
