@@ -416,7 +416,7 @@ class MinMaxOptProb:
             
             # Ratio Rc
             Rc = conv_data / conv_eqn if conv_eqn != 0 else float('inf')
-            print(f"Trial {trial + 1}: conv_data = {conv_data:.4f}, conv_eqn = {conv_eqn:.4f}, Rc = {Rc:.4f}")
+            print(f"Trial {trial + 1}: L0_data={L0_data:.4f}, Lm_data={Lm_data:.4f}, conv_data={conv_data:.4f}, L0_eqn={L0_eqn:.4f}, Lm_eqn={Lm_eqn:.4f}, conv_eqn={conv_eqn:.4f}, Rc={Rc:.4f}")
             
             # Check criterion
             if criterion_low < Rc < criterion_high:
@@ -427,6 +427,14 @@ class MinMaxOptProb:
             prev_gamma = gamma
             gamma = gamma * (Rc ** eta)
             print(f"Updating gamma to {gamma:.4f}")
+            if gamma < 0:
+                print("Gamma became negative, resetting to 1e-3")
+                gamma = 1e-3
+                return gamma
+            elif gamma > 1:
+                print("Gamma exceeded 1, resetting to 0.999")
+                gamma = 0.999
+                return gamma
             
             # Early stop if gamma stabilizes
             if abs(gamma - prev_gamma) < tol:
