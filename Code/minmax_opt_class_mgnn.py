@@ -118,7 +118,7 @@ class MinMaxOptProb:
         self.grad_u = jit(vmap(grad(net_u, argnums=1), in_axes = (None, 0)))
         self.hessian_u = jit(vmap(hessian(net_u, argnums=1), in_axes = (None, 0)))
 
-    def maximize_kh_vec(self, params, current_key):
+    def maximize_kh(self, params, current_key):
         Nt = self.pwp.N_elements
         vertices_all = self.pwp.triangles
         u_values_all = self.u_eval(params, vertices_all.reshape(-1, 2)).reshape(Nt, 3, -1)
@@ -134,8 +134,10 @@ class MinMaxOptProb:
         perturbed_coeffs_all = init_coeffs_all[:, None, :] + perturbations_all
         losses_all = vmap(self.loss_kh_per_elem, in_axes=(0, 0, None))(jnp.arange(Nt), perturbed_coeffs_all, params)
         best_indices = jnp.argmax(losses_all, axis=1)
+        # print(f"Nt: {Nt}, losses_all shape: {losses_all[jnp.arange(Nt), best_indices].shape}")
+        loss_eqn = jnp.sum(losses_all[:, best_indices])
         best_coeffs_all = perturbed_coeffs_all[jnp.arange(Nt), best_indices]
-        return best_coeffs_all, current_key
+        return best_coeffs_all, current_key, loss_eqn
 
     def loss_kh_per_elem(self, tri_idx, p_coeffs_all, params):
         quad_points = self.pwp.quad_points_tri[tri_idx]
@@ -274,13 +276,11 @@ class MinMaxOptProb:
         for grade_idx in range(self.total_grade):
             print(f"\nTraining Grade {grade_idx}")
             self.gen_funcs(grade_idx)
-            self.maximize_kh = jit(self.maximize_kh_vec)
-            loss_eqn_fn = jit(self.loss_fn_eqn)
-            loss_data_fn = jit(self.loss_fn_ibc)
+            # self.maximize_kh = jit(self.maximize_kh)
             params = self.model.mlps[grade_idx].params
             optimizer = self.optimizer_list[grade_idx]
             opt_state = self.opt_state_list[grade_idx]
-            self.pwp.coeffs, self.key = self.maximize_kh(params, self.key)
+            self.pwp.coeffs, self.key, loss_eqn_from_kh = self.maximize_kh(params, self.key)
             for iter in range(self.grade_epochs[grade_idx]):
                 if iter % self.f_adaptive_weight == 0:
                     self.gamma = self.determine_equation_weight(grade_idx, gamma_init=self.gamma)
@@ -289,8 +289,8 @@ class MinMaxOptProb:
                 if iter % self.f_opt_kh == 0:
                     self.pwp.coeffs, self.key = self.maximize_kh(params, self.key)
                 loss, (loss_eqn, loss_ibc) = self.loss_fn(params)
-                if iter % 100 == 0:
-                    print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.8f}, loss_ibc: {loss_ibc:.8f}")
+                if iter % 1 == 0:
+                    print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.8f}, loss_eqn_from_kh: {loss_eqn_from_kh:.8f}, loss_ibc: {loss_ibc:.8f}")
                     wandb.log({f"grade_{grade_idx}_loss_eqn": loss_eqn, f"grade_{grade_idx}_loss_ibc": loss_ibc, "step": self.global_step + iter})
                 self.model.mlps[grade_idx].params = params
                 self.opt_state_list[grade_idx] = opt_state
@@ -308,7 +308,7 @@ class MinMaxOptProb:
             self.gamma = self.determine_equation_weight(gamma_init=self.gamma)
             print(f"\nStage 2: Refining Last {self.k} Grades")
             self.gen_funcs()
-            self.maximize_kh = jit(self.maximize_kh_vec)
+            self.maximize_kh = jit(self.maximize_kh)
             loss_eqn_fn = jit(self.loss_fn_eqn)
             loss_data_fn = jit(self.loss_fn_ibc)
             params_last_k = [mlp.params for mlp in self.model.mlps[-self.k:]]
@@ -394,7 +394,7 @@ class MinMaxOptProb:
             # Collect loss history
             loss_history_data = []
             loss_history_eqn = []
-            self.pwp.coeffs, self.key = self.maximize_kh(current_params, self.key)
+            self.pwp.coeffs, self.key, loss_eqn_from_kh = self.maximize_kh(current_params, self.key)
             for iter in range(N0):
                 (loss, (loss_eqn, loss_data)), grads = jax.value_and_grad(total_loss, has_aux=True)(current_params)
                 loss_history_data.append(loss_data)
@@ -402,11 +402,11 @@ class MinMaxOptProb:
                 updates, current_opt_state = optimizer.update(grads, current_opt_state)
                 current_params = optax.apply_updates(current_params, updates)
                 if iter % self.f_opt_kh == 0:
-                    self.pwp.coeffs, self.key = self.maximize_kh(current_params, self.key)
+                    self.pwp.coeffs, self.key, loss_eqn_from_kh = self.maximize_kh(current_params, self.key)
                 loss_eqn = loss_eqn_fn(current_params)
                 loss_data = loss_data_fn(current_params)
                 if iter % 100 == 0:
-                    print(f"Grade {grade_idx}, Gamma {gamma}, Iter {iter}, loss_eqn: {loss_eqn:.8f}, loss_ibc: {loss_data:.8f}")
+                    print(f"Grade {grade_idx}, Gamma {gamma}, Iter {iter}, loss_eqn: {loss_eqn:.8f}, loss_eqn_from_kh: {loss_eqn_from_kh:.8f}, loss_ibc: {loss_data:.8f}")
 
             # Initial losses (at i=0)
             L0_data = max(loss_history_data[:N1])
@@ -473,7 +473,7 @@ class MinMaxOptProb:
             mlp.params = params
         print(f"Model loaded from {model_path} with hidden_dims_list: {loaded_hidden_dims_list}")
         self.opt_state_list = [opt.init(mlp.params) for opt, mlp in zip(self.optimizer_list, self.model.mlps)]
-        self.pwp.coeffs, self.key = self.maximize_kh_vec(self.key)
+        self.pwp.coeffs, self.key = self.maximize_kh(self.key)
         loss_eqn = self.loss_fn_eqn(loaded_params, self.pwp.coeffs)
         loss_ibc = self.loss_fn_ibc(loaded_params)
         print(f"For the loaded model, loss_eqn: {loss_eqn:.8f}, Loss_bc: {loss_ibc:.8f}")
