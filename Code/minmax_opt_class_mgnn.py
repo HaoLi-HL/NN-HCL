@@ -118,23 +118,6 @@ class MinMaxOptProb:
         self.grad_u = jit(vmap(grad(net_u, argnums=1), in_axes = (None, 0)))
         self.hessian_u = jit(vmap(hessian(net_u, argnums=1), in_axes = (None, 0)))
 
-    def loss_kh_per_elem(self, tri_idx, p_coeffs_all, params):
-        quad_points = self.pwp.quad_points_tri[tri_idx]
-        quad_weights = self.pwp.quad_weights_tri[tri_idx].flatten()
-        u_quad = self.u_eval(params, quad_points)
-        grad_u_tx = self.grad_u(params, quad_points)
-        u_t, u_x = grad_u_tx[:, 0], grad_u_tx[:, 1]
-        residual = self.res(u_quad, u_t, u_x).flatten()
-        k_h_quad_all = (
-            p_coeffs_all[:, 0][:, None] + 
-            p_coeffs_all[:, 1][:, None] * quad_points[:, 0] + 
-            p_coeffs_all[:, 2][:, None] * quad_points[:, 1]
-        )
-        integrand_all = residual[None, :] * jnp.sign(u_quad[None, :] - k_h_quad_all)
-        loss = jnp.sum(quad_weights[None, :] * integrand_all, axis=1)
-        return loss
-
-
     def maximize_kh_vec(self, params, current_key):
         Nt = self.pwp.N_elements
         vertices_all = self.pwp.triangles
@@ -153,6 +136,22 @@ class MinMaxOptProb:
         best_indices = jnp.argmax(losses_all, axis=1)
         best_coeffs_all = perturbed_coeffs_all[jnp.arange(Nt), best_indices]
         return best_coeffs_all, current_key
+
+    def loss_kh_per_elem(self, tri_idx, p_coeffs_all, params):
+        quad_points = self.pwp.quad_points_tri[tri_idx]
+        quad_weights = self.pwp.quad_weights_tri[tri_idx].flatten()
+        u_quad = self.u_eval(params, quad_points)
+        grad_u_tx = self.grad_u(params, quad_points)
+        u_t, u_x = grad_u_tx[:, 0], grad_u_tx[:, 1]
+        residual = self.res(u_quad, u_t, u_x).flatten()
+        k_h_quad_all = (
+            p_coeffs_all[:, 0][:, None] + 
+            p_coeffs_all[:, 1][:, None] * quad_points[:, 0] + 
+            p_coeffs_all[:, 2][:, None] * quad_points[:, 1]
+        )
+        integrand_all = residual[None, :] * jnp.sign(u_quad[None, :] - k_h_quad_all)
+        loss = jnp.sum(quad_weights[None, :] * integrand_all, axis=1)
+        return loss
 
     def loss_fn_elem_int(self, params):
         quad_points = self.pwp.quad_points
@@ -289,8 +288,7 @@ class MinMaxOptProb:
                 loss_eqn, loss_ibc, params, opt_state = self.train_step(params, optimizer, opt_state)
                 if iter % self.f_opt_kh == 0:
                     self.pwp.coeffs, self.key = self.maximize_kh(params, self.key)
-                loss_eqn = loss_eqn_fn(params)
-                loss_data = loss_data_fn(params)
+                loss, (loss_eqn, loss_ibc) = self.loss_fn(params)
                 if iter % 100 == 0:
                     print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.8f}, loss_ibc: {loss_ibc:.8f}")
                     wandb.log({f"grade_{grade_idx}_loss_eqn": loss_eqn, f"grade_{grade_idx}_loss_ibc": loss_ibc, "step": self.global_step + iter})
