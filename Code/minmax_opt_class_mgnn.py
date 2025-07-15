@@ -26,14 +26,13 @@ def pytree_l2_norm(pytree):
 
 # Optimizer Class
 class MinMaxOptProb:
-    def __init__(self, N_t=10, N_x=10, lr_theta=0.01, hidden_dims_list=[(64, 64), (32, 32), (16, 16)], seed=0, sigma=0.1, N_perturb=5000, N_bc=100, N_ic=100,
+    def __init__(self, N_t=10, N_x=10, hidden_dims_list=[(64, 64), (32, 32), (16, 16)], seed=0, sigma=0.1, N_perturb=5000, N_bc=100, N_ic=100,
                  t_min=0, t_max=1, x_min=0, x_max=1, k_h_rf_times=1, u0=None, u1=None, u2=None, lambda_bc_static=0.9, project="minmax_opt_mgnn_burgers",
                  lambda_ic=10.0, lambda_bc=10.0, lambda_r=1.0, gamma=0.3,
                  L1_regularization=1, sampling_method='normal', notes='',
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  f_adaptive_weight=10000, f_opt_kh=10, nu=0.01, res_visc=None, res=None, use_loss_fn_elem_int=True, total_grade=3, k=2, use_a=True):
         self.pwp = PiecewiseLinearPolynomials(N_t, N_x, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, times=k_h_rf_times)
-        self.lr_theta = lr_theta
         self.lb = jnp.array([t_min, x_min])
         self.ub = jnp.array([t_max, x_max])
         self.h = (x_max - x_min)/N_x
