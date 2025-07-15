@@ -290,7 +290,8 @@ class MinMaxOptProb:
                 if iter % 100 == 0:
                     print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.8f}, loss_ibc: {loss_ibc:.8f}")
                     wandb.log({f"grade_{grade_idx}_loss_eqn": loss_eqn, f"grade_{grade_idx}_loss_ibc": loss_ibc, "step": self.global_step + iter})
-                    self.model.mlps[grade_idx].params = params
+                self.model.mlps[grade_idx].params = params
+                self.opt_state_list[grade_idx] = opt_state
             self.opt_state_list[grade_idx] = opt_state
             self.global_step += self.grade_epochs[grade_idx]
         end_time = time.perf_counter()
