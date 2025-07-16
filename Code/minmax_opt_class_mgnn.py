@@ -121,9 +121,9 @@ class MinMaxOptProb:
     def maximize_kh(self, params, current_key):
         Nt = self.pwp.N_elements
         vertices_all = self.pwp.triangles
-        u_values_all = self.u_eval(params, vertices_all.reshape(-1, 2)).reshape(Nt, 3, -1)
+        u_values_all = self.u_eval(params, vertices_all.reshape(-1, 2)).reshape(Nt, 3)
         A_all = jnp.stack([jnp.ones((Nt, 3)), vertices_all[:, :, 0], vertices_all[:, :, 1]], axis=-1)
-        init_coeffs_all = jnp.linalg.solve(A_all, u_values_all.reshape(Nt, 3, 1)).squeeze(-1)
+        init_coeffs_all = jnp.linalg.solve(A_all, u_values_all[..., None]).squeeze(-1)
         key, current_key = jax.random.split(current_key)
         keys = jax.random.split(key, Nt)
         if self.sampling_method == 'normal':
@@ -134,9 +134,9 @@ class MinMaxOptProb:
         perturbed_coeffs_all = init_coeffs_all[:, None, :] + perturbations_all
         losses_all = vmap(self.loss_kh_per_elem, in_axes=(0, 0, None))(jnp.arange(Nt), perturbed_coeffs_all, params)
         best_indices = jnp.argmax(losses_all, axis=1)
-        # print(f"Nt: {Nt}, losses_all shape: {losses_all[jnp.arange(Nt), best_indices].shape}")
+        print(f"Nt: {Nt}, losses_all shape: {losses_all[:, best_indices].shape}")
         loss_eqn = jnp.sum(losses_all[:, best_indices])
-        best_coeffs_all = perturbed_coeffs_all[jnp.arange(Nt), best_indices]
+        best_coeffs_all = perturbed_coeffs_all[:, best_indices]
         return best_coeffs_all, current_key, loss_eqn
 
     def loss_kh_per_elem(self, tri_idx, p_coeffs_all, params):
