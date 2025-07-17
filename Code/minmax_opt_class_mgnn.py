@@ -151,7 +151,9 @@ class MinMaxOptProb:
             p_coeffs_all[:, 1][:, None] * quad_points[:, 0] + 
             p_coeffs_all[:, 2][:, None] * quad_points[:, 1]
         )
+        print(f"tri_idx: {tri_idx}, k_h_quad_all shape: {k_h_quad_all.shape}, u_quad shape: {u_quad.shape}, residual shape: {residual.shape}")
         integrand_all = residual[None, :] * jnp.sign(u_quad[None, :] - k_h_quad_all)
+        print(f"integrand_all shape: {integrand_all.shape}, quad_weights shape: {quad_weights.shape}")
         loss = jnp.sum(quad_weights[None, :] * integrand_all, axis=1)
         return loss
 
