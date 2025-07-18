@@ -298,7 +298,7 @@ class MinMaxOptProb:
                 loss, (loss_eqn, loss_ibc) = self.loss_fn(params)
                 if iter % 100 == 0:
                     print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_eqn_from_kh: {loss_eqn_from_kh:.6f}, loss_eqn_abs: {loss_eqn_abs:.6f}, loss_ibc: {loss_ibc:.6f}")
-                    # wandb.log({f"grade_{grade_idx}_loss_eqn": loss_eqn, f"grade_{grade_idx}_loss_ibc": loss_ibc, "step": self.global_step + iter})
+                    wandb.log({f"grade_{grade_idx}_loss_eqn": loss_eqn, f"grade_{grade_idx}_loss_ibc": loss_ibc, "step": self.global_step + iter})
                 self.model.mlps[grade_idx].params = params
                 self.opt_state_list[grade_idx] = opt_state
             self.opt_state_list[grade_idx] = opt_state
