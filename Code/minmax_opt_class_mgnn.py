@@ -172,10 +172,7 @@ class MinMaxOptProb:
         integrand = residual * jnp.sign(u_quad - k_h_quad)
 
         if self.L1_regularization > 0:
-            hessian_u_tx = self.hessian_u(params, quad_points)
-            u_xx = hessian_u_tx[:, 1, 1].flatten()
-            residual_visc = self.res_visc(u_quad, u_t, u_x, u_xx, self.nu)
-            integrand += self.L1_regularization * jnp.abs(self.h * residual_visc)
+            integrand += self.L1_regularization * jnp.abs(self.h * residual)
             
         interior_loss = jnp.dot(quad_weights, integrand)
         return interior_loss
