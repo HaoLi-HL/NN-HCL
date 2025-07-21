@@ -136,7 +136,7 @@ class MinMaxOptProb:
         best_indices = jnp.argmax(losses_all, axis=1)
         print(f"Nt: {Nt}, losses_all shape: {losses_all[:, best_indices].shape}")
         print(f"Nt: {Nt}, loss_abs shape: {loss_abs.shape}")
-        loss_eqn = jnp.sum(losses_all[:, best_indices])
+        loss_eqn = jnp.sum(losses_all[jnp.arange(Nt), best_indices])
         loss_eqn_abs = jnp.sum(loss_abs)
         best_coeffs_all = perturbed_coeffs_all[jnp.arange(Nt), best_indices]
         print(f"best_coeffs_all shape: {best_coeffs_all.shape}, perturbed_coeffs_all shape: {perturbed_coeffs_all.shape}")
