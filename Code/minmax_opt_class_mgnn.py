@@ -284,7 +284,7 @@ class MinMaxOptProb:
             opt_state = self.opt_state_list[grade_idx]
             self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs = self.maximize_kh(params, self.key)
             self.gamma = self.determine_equation_weight(grade_idx, gamma_init=self.gamma)
-            print(f"Stage 1, Iter {iter}, Gamma: {self.gamma:.6f}")
+            print(f"Stage 1, Gamma: {self.gamma:.6f}")
             for iter in range(self.grade_epochs[grade_idx]):                    
                 loss_eqn, loss_ibc, params, opt_state = self.train_step(params, optimizer, opt_state)
                 if iter % self.f_opt_kh == 0:
