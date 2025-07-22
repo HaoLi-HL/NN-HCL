@@ -360,7 +360,7 @@ def plot_comparison_seperate(model, params=None, file_path='/data/burgers_sin_re
 import matplotlib.pyplot as plt
 import jax.numpy as jnp
 
-def plot_comparison_together(model, params=None, file_path='/data/burgers_sin_ref.npz', ts=None):
+def plot_comparison_together(model, params=None, file_path='/data/burgers_sin_ref.npz', ts=None, save_path='comparison_plot_together.eps'):
     """
     Plot both the neural network solution (solid line) and the numerical solution (dashed line)
     for each timestamp in ts, with all comparisons overlaid on the same single figure. For each
@@ -429,4 +429,5 @@ def plot_comparison_together(model, params=None, file_path='/data/burgers_sin_re
     ax.set_title('Solution Comparisons')
 
     plt.tight_layout()
+    plt.savefig(save_path, format='eps', bbox_inches='tight')
     plt.show()
