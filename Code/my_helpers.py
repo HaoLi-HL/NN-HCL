@@ -292,6 +292,10 @@ def compute_errors(model, file_path='/data/burgers_sin_ref.npz', params=None, T=
     spacetime_den = np.trapezoid(int_x_abs_u, times)
     err_spacetime = spacetime_num / spacetime_den if spacetime_den != 0 else np.inf
 
+    # Print the errors
+    print(f"Relative error at T: {err_T}")
+    print(f"Space-time relative error: {err_spacetime}")
+
     return err_T, err_spacetime
 
 # Example usage (assuming model and params are defined):
@@ -355,10 +359,6 @@ def plot_comparison_seperate(model, params=None, file_path='/data/burgers_sin_re
     plt.tight_layout()
     plt.show()
 
-
-    import numpy as np
-import matplotlib.pyplot as plt
-import jax.numpy as jnp
 
 def plot_comparison_together(model, params=None, file_path='/data/burgers_sin_ref.npz', ts=None, save_path='comparison_plot_together.eps'):
     """
