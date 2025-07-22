@@ -73,7 +73,7 @@ class MinMaxOptProb:
         self.sampling_method = sampling_method
         self.project = project
         self.notes = notes
-        self.run_name = f"Nt{N_t}_Nx{N_x}_lrs{init_lrs[0]}_eps{grade_epochs[0]}_L1{L1_regularization}_sig{sigma}_sd{seed}"
+        self.run_name = f"Nt{N_t}_Nx{N_x}_lrs{init_lrs[0]}_eps{grade_epochs[0]}_L1reg{L1_regularization}_sig{sigma}_sd{seed}"
         # Initialize optimizers for each grade of the first stage
         self.init_lrs = init_lrs
         self.grade_epochs = grade_epochs
@@ -289,9 +289,9 @@ class MinMaxOptProb:
                 self.gamma = self.determine_equation_weight(grade_idx, gamma_init=self.gamma)
                 print(f"Stage 1, Gamma: {self.gamma:.6f}")
             for iter in range(self.grade_epochs[grade_idx]):
-                # if iter % self.f_adaptive_weight == 0:
-                #     self.update_adaptive_weights(params)
-                #     print(f"Grade {grade_idx}, Iter {iter}, lambda_ic: {self.lambda_ic:.6f}, lambda_bc: {self.lambda_bc:.6f}, lambda_eqn: {self.lambda_eqn:.6f}")
+                if (iter % self.f_adaptive_weight == 0) and (self.gamma == 0.0):
+                    self.update_adaptive_weights(params)
+                    print(f"Grade {grade_idx}, Iter {iter}, lambda_ic: {self.lambda_ic:.6f}, lambda_bc: {self.lambda_bc:.6f}, lambda_eqn: {self.lambda_eqn:.6f}")
                 loss_eqn, loss_ibc, params, opt_state = self.train_step(params, optimizer, opt_state)
                 if iter % self.f_opt_kh == 0:
                     self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs = self.maximize_kh(params, self.key)
