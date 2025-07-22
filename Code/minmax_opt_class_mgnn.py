@@ -28,10 +28,10 @@ def pytree_l2_norm(pytree):
 class MinMaxOptProb:
     def __init__(self, N_t=10, N_x=10, hidden_dims_list=[(64, 64), (32, 32), (16, 16)], seed=0, sigma=0.1, N_perturb=5000, N_bc=100, N_ic=100,
                  t_min=0, t_max=1, x_min=0, x_max=1, k_h_rf_times=1, u0=None, u1=None, u2=None, lambda_bc_static=0.9, project="minmax_opt_mgnn_burgers",
-                 lambda_ic=10.0, lambda_bc=10.0, lambda_r=1.0, gamma=0.3,
+                 lambda_ic=10.0, lambda_bc=10.0, lambda_r=1.0, gamma=0.3, alpha=0.9,
                  L1_regularization=1, sampling_method='normal', notes='',
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
-                 f_adaptive_weight=10000, f_opt_kh=10, nu=0.01, res_visc=None, res=None, use_loss_fn_elem_int=True, total_grade=3, k=2, use_a=True):
+                 f_adaptive_weight=1000, f_opt_kh=10, res_visc=None, res=None, use_loss_fn_elem_int=True, total_grade=3, k=2, use_a=True):
         self.pwp = PiecewiseLinearPolynomials(N_t, N_x, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, times=k_h_rf_times)
         self.lb = jnp.array([t_min, x_min])
         self.ub = jnp.array([t_max, x_max])
@@ -56,8 +56,7 @@ class MinMaxOptProb:
         self.gamma = gamma
         self.f_adaptive_weight = f_adaptive_weight
         self.f_opt_kh = f_opt_kh
-        self.alpha = 0.9
-        self.nu = nu
+        self.alpha = alpha
         self.res_visc = res_visc
         self.res = res
         self.gen_ibc()
@@ -234,18 +233,18 @@ class MinMaxOptProb:
     def loss_fn_ibc(self, params):
         return self.loss_fn_ic(params) + self.loss_fn_bc(params)
 
-    # def loss_fn(self, params):
-    #     loss_ic = self.loss_fn_ic(params)
-    #     loss_bc = self.loss_fn_bc(params)
-    #     loss_eqn = self.loss_fn_elem_int(params)
-    #     total_loss = self.lambda_r * loss_eqn + self.lambda_ic * loss_ic + self.lambda_bc * loss_bc
-    #     return total_loss, (loss_eqn, loss_ic + loss_bc)
-    
     def loss_fn(self, params):
-        loss_ibc = self.loss_fn_ibc(params)
-        loss_eqn = self.loss_fn_eqn(params)
-        total_loss = self.gamma * loss_eqn + (1 - self.gamma) * loss_ibc
-        return total_loss, (loss_eqn, loss_ibc)
+        loss_ic = self.loss_fn_ic(params)
+        loss_bc = self.loss_fn_bc(params)
+        loss_eqn = self.loss_fn_elem_int(params)
+        total_loss = self.lambda_r * loss_eqn + self.lambda_ic * loss_ic + self.lambda_bc * loss_bc
+        return total_loss, (loss_eqn, loss_ic + loss_bc)
+    
+    # def loss_fn(self, params):
+    #     loss_ibc = self.loss_fn_ibc(params)
+    #     loss_eqn = self.loss_fn_eqn(params)
+    #     total_loss = self.gamma * loss_eqn + (1 - self.gamma) * loss_ibc
+    #     return total_loss, (loss_eqn, loss_ibc)
     
     def train_step(self, params, optimizer, opt_state):
         (_, all_losses), grads = jax.value_and_grad(self.loss_fn, argnums=0, has_aux=True)(params)
@@ -282,9 +281,12 @@ class MinMaxOptProb:
             optimizer = self.optimizer_list[grade_idx]
             opt_state = self.opt_state_list[grade_idx]
             self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs = self.maximize_kh(params, self.key)
-            self.gamma = self.determine_equation_weight(grade_idx, gamma_init=self.gamma)
-            print(f"Stage 1, Gamma: {self.gamma:.6f}")
-            for iter in range(self.grade_epochs[grade_idx]):                    
+            # self.gamma = self.determine_equation_weight(grade_idx, gamma_init=self.gamma)
+            # print(f"Stage 1, Gamma: {self.gamma:.6f}")
+            for iter in range(self.grade_epochs[grade_idx]):
+                if iter % self.f_adaptive_weight == 0:
+                    self.update_adaptive_weights(params)
+                    print(f"Grade {grade_idx}, Iter {iter}, lambda_ic: {self.lambda_ic:.6f}, lambda_bc: {self.lambda_bc:.6f}, lambda_r: {self.lambda_r:.6f}")
                 loss_eqn, loss_ibc, params, opt_state = self.train_step(params, optimizer, opt_state)
                 if iter % self.f_opt_kh == 0:
                     self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs = self.maximize_kh(params, self.key)
