@@ -27,8 +27,8 @@ def pytree_l2_norm(pytree):
 # Optimizer Class
 class MinMaxOptProb:
     def __init__(self, N_t=10, N_x=10, hidden_dims_list=[(64, 64), (32, 32), (16, 16)], seed=0, sigma=0.1, N_perturb=5000, N_bc=100, N_ic=100,
-                 t_min=0, t_max=1, x_min=0, x_max=1, k_h_rf_times=1, u0=None, u1=None, u2=None, lambda_bc_static=0.9, project="minmax_opt_mgnn_burgers",
-                 lambda_ic=10.0, lambda_bc=10.0, lambda_eqn=1.0, gamma=0.0, alpha=0.9,
+                 t_min=0, t_max=1, x_min=0, x_max=1, k_h_rf_times=2, u0=None, u1=None, u2=None, lambda_bc_static=0.9, project="minmax_opt_mgnn_burgers",
+                 lambda_ic=10.0, lambda_bc=10.0, lambda_eqn=1.0, gamma=0.0, alpha=0.9, N_test_gamma = 2000,
                  L1_regularization=1, sampling_method='normal', notes='',
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  f_adaptive_weight=1000, f_opt_kh=10, res_visc=None, res=None, use_loss_fn_elem_int=True, total_grade=3, k=2, use_a=True):
@@ -54,6 +54,7 @@ class MinMaxOptProb:
         self.lambda_bc = lambda_bc
         self.lambda_eqn = lambda_eqn
         self.gamma = gamma
+        self.N_test_gamma = N_test_gamma
         self.f_adaptive_weight = f_adaptive_weight
         self.f_opt_kh = f_opt_kh
         self.alpha = alpha
@@ -369,9 +370,9 @@ class MinMaxOptProb:
         self.lambda_bc = self.alpha * self.lambda_bc + (1 - self.alpha) * hat_lambda_bc
         self.lambda_eqn = self.alpha * self.lambda_eqn + (1 - self.alpha) * hat_lambda_r
     
-    def determine_equation_weight(self, grade_idx=None, N0=1000, N1=None, eta=0.1, gamma_init=0.1, criterion_low=0.1, criterion_high=10.0, max_trials=20, tol=1e-5):
+    def determine_equation_weight(self, grade_idx=None, N1=None, eta=0.1, gamma_init=0.1, criterion_low=0.1, criterion_high=10.0, max_trials=20, tol=1e-5):
         if N1 is None:
-            N1 = int(0.1 * N0)
+            N1 = int(0.1 * self.N_test_gamma)
         gamma = gamma_init
         if grade_idx is not None:
             optimizer = self.optimizer_list[grade_idx]
@@ -403,7 +404,7 @@ class MinMaxOptProb:
             loss_history_data = []
             loss_history_eqn = []
             self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs = self.maximize_kh(current_params, self.key)
-            for iter in range(N0):
+            for iter in range(self.N_test_gamma):
                 (loss, (loss_eqn, loss_data)), grads = jax.value_and_grad(total_loss, has_aux=True)(current_params)
                 loss_history_data.append(loss_data)
                 loss_history_eqn.append(loss_eqn)
