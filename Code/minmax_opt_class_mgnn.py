@@ -101,7 +101,6 @@ class MinMaxOptProb:
         self.optimizer_stage2 = optax.adam(lr_stage2)
         self.opt_state_stage2 = None  # To be initialized later
 
-
         self.gen_funcs()
 
     def gen_ibc(self):
@@ -346,10 +345,10 @@ class MinMaxOptProb:
             print(f"Train time for stage2: {train_total_time:.6f} seconds")
             print(f"Train average time per iteration: {train_total_time / self.epoch_stage2:.9e} seconds")
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            if save_model:
-                model_path = os.path.join('data', f'train_model_{self.run_name}_{timestamp}.pkl')
-                self.save_model(model_path)
-                print(f"Train model saved to {model_path}")
+        if save_model:
+            model_path = os.path.join('data', f'trained_model_{self.run_name}_{timestamp}.pkl')
+            self.save_model(model_path)
+            print(f"Train model saved to {model_path}")
 
         wandb.finish()
         
@@ -475,14 +474,15 @@ class MinMaxOptProb:
             loaded_data = pickle.load(f)
         loaded_params = loaded_data['params']
         loaded_hidden_dims_list = loaded_data['hidden_dims_list']
+        loaded_total_grade = loaded_data['total_grade']
         lb = loaded_data['lb']
         ub = loaded_data['ub']
         self.model = MG_NN(input_dim=2, hidden_dims_list=loaded_hidden_dims_list, activation=nn.tanh, lb=lb, ub=ub)
         for mlp, params in zip(self.model.mlps, loaded_params):
             mlp.params = params
-        print(f"Model loaded from {model_path} with hidden_dims_list: {loaded_hidden_dims_list}")
+        print(f"Model loaded from {model_path} with hidden_dims_list: {loaded_hidden_dims_list}, loaded_total_grade = loaded_data['total_grade']")
         self.opt_state_list = [opt.init(mlp.params) for opt, mlp in zip(self.optimizer_list, self.model.mlps)]
-        self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs = self.maximize_kh_vec(self.key)
+        self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs = self.maximize_kh_vec(loaded_params[-1], self.key)
         loss_eqn = self.loss_fn_eqn(loaded_params, self.pwp.coeffs)
         loss_ibc = self.loss_fn_ibc(loaded_params)
         print(f"For the loaded model, loss_eqn: {loss_eqn:.6f}, Loss_bc: {loss_ibc:.6f}")
