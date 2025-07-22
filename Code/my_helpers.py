@@ -182,14 +182,14 @@ def point_in_triangle(P, A, B, C):
     return ~(has_neg & has_pos)  # True if all signs are the same or zero
 
 
-def plot_numerical_solution(file_path='/data/burgers_sin_ref.npz', ts=None):
+def plot_numerical_solution(file_path='data/burgers_sin_ref.npz', ts=None):
     """
     Plot the numerical solution u over the time and space domain from the saved .npz file,
     including a 2D color mesh plot and a 1D plot at the maximum time. Additionally, plot
     separate 1D snapshots for each timestamp in ts if provided.
 
     Args:
-        file_path: Path to the .npz file containing 'times', 'x', and 'u' (default: '/data/burgers_sin_ref.npz').
+        file_path: Path to the .npz file containing 'times', 'x', and 'u' (default: 'data/burgers_sin_ref.npz').
         ts: List or array of timestamps for which to plot individual 1D snapshots (default: None).
     """
     if ts is None:
@@ -235,14 +235,14 @@ def plot_numerical_solution(file_path='/data/burgers_sin_ref.npz', ts=None):
         plt.show()
 
 
-def compute_errors(model, file_path='/data/burgers_sin_ref.npz', params=None, T=None):
+def compute_errors(model, file_path='data/burgers_sin_ref.npz', params=None, T=None):
     """
     Compute the relative error at time T and the space-time relative error between
     the neural network approximation u* and the numerical solution u.
 
     Args:
         model: Flax model instance representing u_theta.
-        file_path: Path to the .npz file containing 'times', 'x', and 'u' (default: '/data/burgers_sin_ref.npz').
+        file_path: Path to the .npz file containing 'times', 'x', and 'u' (default: 'data/burgers_sin_ref.npz').
         params: Parameters (pytree) of the neural network (default: None).
         T: The final time for the error at T. If None, uses the maximum time in the data (default: None).
 
@@ -304,7 +304,7 @@ def compute_errors(model, file_path='/data/burgers_sin_ref.npz', params=None, T=
 # print(f"Space-time relative error: {err_spacetime}")
 
 
-def plot_comparison_seperate(model, params=None, file_path='/data/burgers_sin_ref.npz', ts=None):
+def plot_comparison_seperate(model, params=None, file_path='data/burgers_sin_ref.npz', ts=None):
     """
     Plot both the neural network solution and the numerical solution for each timestamp in ts,
     with both solutions overlaid on the same axes in subplots (one subplot per timestamp).
@@ -312,7 +312,7 @@ def plot_comparison_seperate(model, params=None, file_path='/data/burgers_sin_re
     Args:
         model: Flax model instance representing u_theta.
         params: Parameters (pytree) of the neural network (default: None).
-        file_path: Path to the .npz file containing 'times', 'x', and 'u' (default: '/data/burgers_sin_ref.npz').
+        file_path: Path to the .npz file containing 'times', 'x', and 'u' (default: 'data/burgers_sin_ref.npz').
         ts: List or array of timestamps for which to plot the solutions (default: None).
     """
     if ts is None:
@@ -349,8 +349,8 @@ def plot_comparison_seperate(model, params=None, file_path='/data/burgers_sin_re
 
         # Plot both on the same axes
         ax = axs[i]
-        ax.plot(x, u_num_t, label='Numerical', linewidth=2)
-        ax.plot(x, u_nn_t, label='Neural Network', linestyle='--', linewidth=2)
+        ax.plot(x, u_num_t, label='Ref. solution', linewidth=2)
+        ax.plot(x, u_nn_t, label='NN solution', linestyle='--', linewidth=2)
         ax.legend()
         ax.set_xlabel('x')
         ax.set_ylabel('u')
@@ -360,7 +360,7 @@ def plot_comparison_seperate(model, params=None, file_path='/data/burgers_sin_re
     plt.show()
 
 
-def plot_comparison_together(model, params=None, file_path='/data/burgers_sin_ref.npz', ts=None, save_path='comparison_plot_together.eps'):
+def plot_comparison_together(model, params=None, file_path='data/burgers_sin_ref.npz', ts=None, save_path='data/sine_wave_plot_together.eps', title=None):
     """
     Plot both the neural network solution (solid line) and the numerical solution (dashed line)
     for each timestamp in ts, with all comparisons overlaid on the same single figure. For each
@@ -420,13 +420,14 @@ def plot_comparison_together(model, params=None, file_path='/data/burgers_sin_re
         u_nn_t = np.asarray(u_nn_values).squeeze()  # Shape: (n_x,)
 
         # Plot both on the same axes with same color
-        ax.plot(x, u_num_t, linestyle='--', color=color, label=f'Numerical t={t_val:.2f} (closest {times[idx]:.2f})')
-        ax.plot(x, u_nn_t, linestyle='-', color=color, label=f'Neural Network t={t_val:.2f}')
+        ax.plot(x, u_num_t, linestyle='--', color=color, linewidth=3, label=f'Ref. solution t={t_val:.2f}')
+        ax.plot(x, u_nn_t, linestyle='-', color=color, linewidth=2, label=f'NN solution t={t_val:.2f}')
 
     ax.legend()
     ax.set_xlabel('x')
     ax.set_ylabel('u')
-    ax.set_title('Solution Comparisons')
+    if title is not None:
+        ax.set_title(title)
 
     plt.tight_layout()
     plt.savefig(save_path, format='eps', bbox_inches='tight')
