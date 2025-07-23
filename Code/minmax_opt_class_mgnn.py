@@ -29,7 +29,7 @@ class MinMaxOptProb:
     def __init__(self, N_t=10, N_x=10, hidden_dims_list=[(64, 64), (32, 32), (16, 16)], seed=0, sigma=0.1, N_perturb=5000, N_bc=100, N_ic=100,
                  t_min=0, t_max=1, x_min=0, x_max=1, k_h_rf_times=2, u0=None, u1=None, u2=None, lambda_bc_static=0.9, project="minmax_opt_mgnn_burgers",
                  lambda_ic=10.0, lambda_bc=10.0, lambda_eqn=1.0, gamma=0.0, alpha=0.9, N_test_gamma = 1000, adjust_gamma=True,
-                 L1_regularization=1, sampling_method='normal', notes='',
+                 L1_regularization=1, sampling_method='normal', notes='', lambda_tv=1.0, 
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  f_adaptive_weight=1000, f_opt_kh=10, res_visc=None, res=None, use_loss_fn_elem_int=True, total_grade=3, k=2, use_a=True):
         self.pwp = PiecewiseLinearPolynomials(N_t, N_x, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, times=k_h_rf_times)
@@ -61,6 +61,9 @@ class MinMaxOptProb:
         self.alpha = alpha
         self.res_visc = res_visc
         self.res = res
+        self.lambda_tv = lambda_tv
+        self.N_t_pnts = 10*N_t  # Number of time points for TVD loss
+        self.N_x_pnts = 10*N_x  # Number of x points for TVD loss
         self.gen_ibc()
         if use_loss_fn_elem_int:
             self.loss_fn_eqn = self.loss_fn_elem_int
@@ -162,6 +165,25 @@ class MinMaxOptProb:
         # Compute absolute loss, which is the L1 norm of the residual. Just for comparison and debugging. We do not use it in the optimization.
         loss_abs = jnp.abs(residual)@quad_weights
         return loss, loss_abs
+    
+    def compute_tv_loss(self, params):
+        """Compute the Total Variation Diminishing (TVD) loss."""
+        # Define time points for TV calculation
+        t_points = jnp.linspace(self.pwp.t_min, self.pwp.t_max, self.N_t_pnts)
+        x_points = jnp.linspace(self.pwp.x_min, self.pwp.x_max, self.N_x_pnts)
+        # Create grid for evaluation at consecutive time steps
+        tx_n = jnp.stack(jnp.meshgrid(t_points[:-1], x_points), axis=-1).reshape(-1, 2)
+        tx_n_plus_1 = jnp.stack(jnp.meshgrid(t_points[1:], x_points), axis=-1).reshape(-1, 2)
+        # Evaluate solution at t_n and t_{n+1}
+        u_n = self.u_eval(params, tx_n).reshape(self.N_t_pnts - 1, self.N_x_pnts)
+        u_n_plus_1 = self.u_eval(params, tx_n_plus_1).reshape(self.N_t_pnts - 1, self.N_x_pnts)
+        # Compute TV_h for each time step
+        tv_n = jnp.sum(jnp.abs(u_n[:, 1:] - u_n[:, :-1]), axis=1)
+        tv_n_plus_1 = jnp.sum(jnp.abs(u_n_plus_1[:, 1:] - u_n_plus_1[:, :-1]), axis=1)
+        # Compute TVD loss: sum of squared differences where TV increases
+        tv_diff = tv_n_plus_1 - tv_n
+        tvd_loss = jnp.sum(jnp.maximum(0, tv_diff)**2)
+        return tvd_loss
 
     def loss_fn_elem_int(self, params):
         quad_points = self.pwp.quad_points
@@ -178,7 +200,11 @@ class MinMaxOptProb:
             integrand += self.L1_regularization * jnp.abs(self.h * residual)
             
         interior_loss = jnp.dot(quad_weights, integrand)
-        return interior_loss
+
+        # Add TV penalty term
+        tv_loss = self.compute_tv_loss(params)
+        total_loss = interior_loss + self.lambda_tv * self.h * tv_loss
+        return total_loss
     
     def loss_fn_elem_bdry(self, params, p_coeffs):
         def f(u):
