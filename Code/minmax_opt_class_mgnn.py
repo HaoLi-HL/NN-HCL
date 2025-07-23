@@ -481,11 +481,14 @@ class MinMaxOptProb:
         lb = loaded_data['lb']
         ub = loaded_data['ub']
         self.model = MG_NN(input_dim=2, hidden_dims_list=loaded_hidden_dims_list, activation=nn.tanh, lb=lb, ub=ub)
+        for i in range(self.total_grade):
+            self.model.add_grade()  # Add a new grade
         for mlp, params in zip(self.model.mlps, loaded_params):
             mlp.params = params
-        print(f"Model loaded from {model_path} with hidden_dims_list: {loaded_hidden_dims_list}, loaded_total_grade = loaded_data['total_grade']")
+        print(f"Model loaded from {model_path} with hidden_dims_list: {loaded_hidden_dims_list}, loaded_total_grade = {loaded_data['total_grade']}.")
         self.opt_state_list = [opt.init(mlp.params) for opt, mlp in zip(self.optimizer_list, self.model.mlps)]
+        self.gen_funcs(loaded_total_grade-1)
         self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs = self.maximize_kh_vec(loaded_params[-1], self.key)
-        loss_eqn = self.loss_fn_eqn(loaded_params, self.pwp.coeffs)
-        loss_ibc = self.loss_fn_ibc(loaded_params)
+        loss_eqn = self.loss_fn_eqn(loaded_params[-1])
+        loss_ibc = self.loss_fn_ibc(loaded_params[-1])
         print(f"For the loaded model, loss_eqn: {loss_eqn:.6f}, Loss_bc: {loss_ibc:.6f}")
