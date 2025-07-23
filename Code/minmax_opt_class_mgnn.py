@@ -206,7 +206,7 @@ class MinMaxOptProb:
         weights_per_edge = self.pwp.bdry_weights_tri.reshape(self.pwp.N_elements, 3, N_points_per_edge)
         normals_per_edge = self.pwp.normals
 
-        def compute_edge_integral(points, weights, normal, p_coeffs_K):
+        def compute_edge_integral(points, weights, normal, p_coeffs_K, params):
             u_theta = self.u_eval(params, points)
             k_h = (p_coeffs_K[0] + 
                    p_coeffs_K[1] * points[:, 0] + 
@@ -219,13 +219,13 @@ class MinMaxOptProb:
             integrand = flux_diff * sgn
             return jnp.sum(weights * integrand)
 
-        def compute_triangle_boundary_loss(points_tri, weights_tri, normals_tri, p_coeffs_K):
-            edge_losses = vmap(compute_edge_integral, in_axes=(0, 0, 0, None))(
-                points_tri, weights_tri, normals_tri, p_coeffs_K)
+        def compute_triangle_boundary_loss(points_tri, weights_tri, normals_tri, p_coeffs_K, params):
+            edge_losses = vmap(compute_edge_integral, in_axes=(0, 0, 0, None, None))(
+                points_tri, weights_tri, normals_tri, p_coeffs_K, params)
             return jnp.sum(edge_losses)
 
-        boundary_loss = jnp.sum(vmap(compute_triangle_boundary_loss, in_axes=(0, 0, 0, 0))(
-                                points_per_edge, weights_per_edge, normals_per_edge, p_coeffs))
+        boundary_loss = jnp.sum(vmap(compute_triangle_boundary_loss, in_axes=(0, 0, 0, 0, None))(
+                                points_per_edge, weights_per_edge, normals_per_edge, p_coeffs, params))
         total_loss = interior_loss + boundary_loss
         return total_loss
         
@@ -241,7 +241,7 @@ class MinMaxOptProb:
     def loss_fn_lambda(self, params):
         loss_ic = self.loss_fn_ic(params)
         loss_bc = self.loss_fn_bc(params)
-        loss_eqn = self.loss_fn_elem_int(params)
+        loss_eqn = self.loss_fn_eqn(params)
         total_loss = self.lambda_eqn * loss_eqn + self.lambda_ic * loss_ic + self.lambda_bc * loss_bc
         return total_loss, (loss_eqn, loss_ic + loss_bc)
     
@@ -278,6 +278,11 @@ class MinMaxOptProb:
 
         # Stage 1: Sequential Grade Training
         print("\nStage 1: Sequential Grade Training")
+        self.loss_eqn_history = [[] for _ in range(self.total_grade)]
+        self.loss_bc_history = [[] for _ in range(self.total_grade)]
+        self.best_params_list = [None] * self.total_grade
+        self.best_loss_eqn_list = [float('inf')] * self.total_grade
+
         for grade_idx in range(self.total_grade):
             print(f"\nTraining Grade {grade_idx}")
             self.gen_funcs(grade_idx)
@@ -289,6 +294,7 @@ class MinMaxOptProb:
             if self.gamma > 0.0 and self.adjust_gamma:
                 self.gamma = self.determine_equation_weight(grade_idx, gamma_init=self.gamma)
                 print(f"Stage 1, Gamma: {self.gamma:.6f}")
+            monitor_start = int(0.9 * self.grade_epochs[grade_idx])
             for iter in range(self.grade_epochs[grade_idx]):
                 if (iter % self.f_adaptive_weight == 0) and (self.gamma == 0.0):
                     self.update_adaptive_weights(params)
@@ -297,11 +303,23 @@ class MinMaxOptProb:
                 if iter % self.f_opt_kh == 0:
                     self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs = self.maximize_kh(params, self.key)
                 loss, (loss_eqn, loss_ibc) = self.loss_fn(params)
+
+                self.loss_eqn_history[grade_idx].append(loss_eqn)
+                self.loss_bc_history[grade_idx].append(loss_ibc)
+                if iter >= monitor_start:
+                    if loss_eqn < self.best_loss_eqn_list[grade_idx]:
+                        self.best_loss_eqn_list[grade_idx] = loss_eqn
+                        self.best_params_list[grade_idx] = jax.tree_util.tree_map(jnp.copy, params)
+
                 if iter % 100 == 0:
                     print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_eqn_from_kh: {loss_eqn_from_kh:.6f}, loss_eqn_abs: {loss_eqn_abs:.6f}, loss_ibc: {loss_ibc:.6f}")
                     wandb.log({f"grade_{grade_idx}_loss_eqn": loss_eqn, f"grade_{grade_idx}_loss_ibc": loss_ibc, "step": self.global_step + iter})
                 self.model.mlps[grade_idx].params = params
                 self.opt_state_list[grade_idx] = opt_state
+
+            # Assign the best params found in the last 10%
+            if self.best_params_list[grade_idx] is not None:
+                self.model.mlps[grade_idx].params = self.best_params_list[grade_idx]
             self.opt_state_list[grade_idx] = opt_state
             self.global_step += self.grade_epochs[grade_idx]
         end_time = time.perf_counter()
@@ -325,6 +343,9 @@ class MinMaxOptProb:
             optimizer = self.optimizer_stage2
             opt_state = self.opt_state_stage2
             self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs = self.maximize_kh(params_last_k, self.key)
+            monitor_start = int(0.9 * self.epoch_stage2)
+            best_loss_eqn = float('inf')
+            best_params_last_k = None
             for iter in range(self.epoch_stage2):
                 if iter % self.f_adaptive_weight == 0:
                     self.update_adaptive_weights(params)
@@ -333,10 +354,17 @@ class MinMaxOptProb:
                 if iter % self.f_opt_kh == 0:
                     self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs = self.maximize_kh(params_last_k, self.key)
                 loss_eqn = loss_eqn_fn(params_last_k)
-                loss_data = loss_data_fn(params_last_k)
+                loss_ibc = loss_data_fn(params_last_k)
+                if iter >= monitor_start:
+                    if loss_eqn < best_loss_eqn:
+                        best_loss_eqn = loss_eqn
+                        best_params_last_k = jax.tree_util.tree_map(jnp.copy, params_last_k)
                 if iter % 100 == 0:
                     print(f"Stage 2, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_ibc: {loss_ibc:.6f}")
                     wandb.log({"second_stage_loss_eqn": loss_eqn, "second_stage_loss_ibc": loss_ibc, "step": self.global_step + iter})
+            # Assign the best params found in the last 10%
+            if best_params_last_k is not None:
+                params_last_k = best_params_last_k
             for mlp, p in zip(self.model.mlps[-self.k:], params_last_k):
                 mlp.params = p
             self.global_step += self.epoch_stage2
@@ -417,7 +445,7 @@ class MinMaxOptProb:
                 loss_history_data.append(loss_data)
                 loss_history_eqn.append(loss_eqn)
                 if iter % 100 == 0:
-                    print(f"Grade {grade_idx}, Gamma {gamma}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_eqn_from_kh: {loss_eqn_from_kh:.6f}, loss_ibc: {loss_data:.6f}")
+                    print(f"Gamma {gamma}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_eqn_from_kh: {loss_eqn_from_kh:.6f}, loss_ibc: {loss_data:.6f}")
 
             # Initial losses (at i=0)
             L0_data = max(loss_history_data[:N1])
