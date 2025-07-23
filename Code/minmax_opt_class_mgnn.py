@@ -286,7 +286,7 @@ class MinMaxOptProb:
             optimizer = self.optimizer_list[grade_idx]
             opt_state = self.opt_state_list[grade_idx]
             self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs = self.maximize_kh(params, self.key)
-            if self.gamma > 0.0:
+            if self.gamma > 0.0 and self.adjust_gamma:
                 self.gamma = self.determine_equation_weight(grade_idx, gamma_init=self.gamma)
                 print(f"Stage 1, Gamma: {self.gamma:.6f}")
             for iter in range(self.grade_epochs[grade_idx]):
@@ -314,7 +314,8 @@ class MinMaxOptProb:
         # Stage 2: Refinement of Last k Grades
         if self.k > 0 and self.k <= self.total_grade:
             start_time = time.perf_counter()
-            self.gamma = self.determine_equation_weight(gamma_init=self.gamma)
+            if self.gamma > 0.0 and self.adjust_gamma:
+                self.gamma = self.determine_equation_weight(gamma_init=self.gamma)
             print(f"\nStage 2: Refining Last {self.k} Grades")
             self.gen_funcs()
             self.maximize_kh = jit(self.maximize_kh_vec)
@@ -327,8 +328,8 @@ class MinMaxOptProb:
             self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs = self.maximize_kh(params_last_k, self.key)
             for iter in range(self.epoch_stage2):
                 if iter % self.f_adaptive_weight == 0:
-                    self.gamma = self.determine_equation_weight(gamma_init=self.gamma)
-                    print(f"Stage 2, Iter {iter}, Gamma: {self.gamma:.6f}")
+                    self.update_adaptive_weights(params)
+                    print(f"Stage 2, Iter {iter}, lambda_ic: {self.lambda_ic:.6f}, lambda_bc: {self.lambda_bc:.6f}, lambda_eqn: {self.lambda_eqn:.6f}")
                 loss_eqn, loss_ibc, params_last_k, opt_state = self.train_step(params_last_k, optimizer, opt_state)
                 if iter % self.f_opt_kh == 0:
                     self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs = self.maximize_kh(params_last_k, self.key)
