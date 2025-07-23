@@ -74,7 +74,7 @@ class MinMaxOptProb:
         self.sampling_method = sampling_method
         self.project = project
         self.notes = notes
-        self.run_name = f"Nt{N_t}_Nx{N_x}_lrs{init_lrs[0]}_eps{grade_epochs[0]}_L1reg{L1_regularization}_sig{sigma}_sd{seed}"
+        self.run_name = f"Nt{N_t}_Nx{N_x}_lrs{init_lrs[0]}_eps{grade_epochs[0]}_L1reg{L1_regularization}_sig{sigma}_gam{gamma}_sd{seed}"
         # Initialize optimizers for each grade of the first stage
         self.init_lrs = init_lrs
         self.grade_epochs = grade_epochs
