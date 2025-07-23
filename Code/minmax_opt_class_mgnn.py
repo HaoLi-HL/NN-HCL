@@ -344,8 +344,9 @@ class MinMaxOptProb:
             train_total_time = end_time - start_time
             print(f"Train time for stage2: {train_total_time:.6f} seconds")
             print(f"Train average time per iteration: {train_total_time / self.epoch_stage2:.9e} seconds")
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
         if save_model:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             model_path = os.path.join('data', f'trained_model_{self.run_name}_{timestamp}.pkl')
             self.save_model(model_path)
             print(f"Train model saved to {model_path}")
