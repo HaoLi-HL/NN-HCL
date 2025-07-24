@@ -64,6 +64,8 @@ class MinMaxOptProb:
         self.lambda_tv = lambda_tv
         self.N_t_pnts = 10*N_t  # Number of time points for TVD loss
         self.N_x_pnts = 10*N_x  # Number of x points for TVD loss
+        self.t_points = jnp.linspace(self.pwp.t_min, self.pwp.t_max, self.N_t_pnts)
+        self.x_points = jnp.linspace(self.pwp.x_min, self.pwp.x_max, self.N_x_pnts)
         self.gen_ibc()
         if use_loss_fn_elem_int:
             self.loss_fn_eqn = self.loss_fn_elem_int
@@ -169,8 +171,8 @@ class MinMaxOptProb:
     def compute_tv_loss(self, params):
         """Compute the Total Variation Diminishing (TVD) loss."""
         # Define time points for TV calculation
-        t_points = jnp.linspace(self.pwp.t_min, self.pwp.t_max, self.N_t_pnts)
-        x_points = jnp.linspace(self.pwp.x_min, self.pwp.x_max, self.N_x_pnts)
+        t_points = self.t_points
+        x_points = self.x_points
         # Create grid for evaluation at consecutive time steps
         tx_n = jnp.stack(jnp.meshgrid(t_points[:-1], x_points), axis=-1).reshape(-1, 2)
         tx_n_plus_1 = jnp.stack(jnp.meshgrid(t_points[1:], x_points), axis=-1).reshape(-1, 2)
