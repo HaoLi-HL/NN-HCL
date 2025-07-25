@@ -8,15 +8,20 @@ import pickle
 from minmax_opt_class import MinMaxOptProb
 from my_helpers import plot_u_theta, plot_loss_history
 import matplotlib.pyplot as plt
+import wandb
 
 
 
 
-class SequentialMinMaxOptProb:
-    def __init__(self, num_segments, total_t_min, total_t_max, seq_T=None, N_t=10, N_x=10, lr_theta=0.01, hidden_dims=(64, 64, 64), 
-                 seed=0, sigma=0.1, N_perturb=5000, N_bc=100, N_ic=100, x_min=0, x_max=1, k_h_rf_times=1, 
-                 u0=None, u1=None, u2=None, lambda_bc_static=0.9, alpha_p_coeffs=0, f_adaptive=1000, 
-                 nu=0.001, res_visc=None, res=None, if_pre_train=False, M_t=500, M_x=500, use_loss_elem_int=True):
+class SeqMinMaxOptProb:
+    def __init__(self, num_segments, total_t_min, total_t_max, seq_T=None, N_t=10, N_x=10, hidden_dims_list=[(64, 64, 64, 64)],
+                 seed=0, sigma=0.1, N_perturb=10000, N_bc=2048, N_ic=4096, 
+                 x_min=0, x_max=1, k_h_rf_times=2, u0=None, u1=None, u2=None, project="seq_minmax_mgnn_burgers",
+                 lambda_ic=10.0, lambda_bc=10.0, lambda_eqn=1.0, gamma=0.0, alpha=0.9, N_test_gamma=1000, adjust_gamma=True,
+                 L1_regularization=1, sampling_method='normal', notes='', lambda_tv=1.0, 
+                 init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
+                 f_adaptive_weight=1000, f_opt_kh=10, res=None, res_visc=None, use_loss_fn_elem_int=True, total_grade=1, k=0, use_a=True,
+                 if_pre_train=False, M_t=1000, M_x=2000):
         """
         Initialize the sequential training class.
 
@@ -31,13 +36,8 @@ class SequentialMinMaxOptProb:
         
         self.total_t_min = total_t_min
         self.total_t_max = total_t_max
-        self.seq_T = np.array(seq_T)
-        if self.seq_T is None:
-            self.num_segments = num_segments
-            self.t_segment_length = (total_t_max-total_t_min) / num_segments
-            self.seq_T = np.array([self.total_t_min + i * self.t_segment_length for i in range(self.num_segments+1)])
-        else:
-            self.num_segments = len(self.seq_T) - 1
+        self.seq_T = np.array(seq_T) if seq_T is not None else np.linspace(total_t_min, total_t_max, num_segments + 1)
+        self.num_segments = len(self.seq_T) - 1
 
         self.u0 = u0
         self.u1 = u1
@@ -48,27 +48,45 @@ class SequentialMinMaxOptProb:
         # Store other parameters for segment creation
         self.N_t = N_t
         self.N_x = N_x
-        self.lr_theta = lr_theta
-        self.hidden_dims = hidden_dims
+        self.hidden_dims_list = hidden_dims_list
         self.seed = seed
         self.sigma = sigma
         self.N_perturb = N_perturb
         self.N_bc = N_bc
         self.N_ic = N_ic
         self.k_h_rf_times = k_h_rf_times
-        # self.lambda_bc_static = lambda_bc_static
-        # self.alpha_p_coeffs = alpha_p_coeffs
-        # self.f_adaptive = f_adaptive
-        self.nu = nu
-        self.res_visc = res_visc
+        self.lambda_ic = lambda_ic
+        self.lambda_bc = lambda_bc
+        self.lambda_eqn = lambda_eqn
+        self.gamma = gamma
+        self.alpha = alpha
+        self.N_test_gamma = N_test_gamma
+        self.adjust_gamma = adjust_gamma
+        self.L1_regularization = L1_regularization
+        self.sampling_method = sampling_method
+        self.notes = notes
+        self.lambda_tv = lambda_tv
+        self.init_lrs = init_lrs
+        self.grade_epochs = grade_epochs
+        self.decay_rates = decay_rates
+        self.init_lr_stage2 = init_lr_stage2
+        self.epoch_stage2 = epoch_stage2
+        self.decay_rate_stage2 = decay_rate_stage2
+        self.f_adaptive_weight = f_adaptive_weight
+        self.f_opt_kh = f_opt_kh
         self.res = res
+        self.res_visc = res_visc
+        self.use_loss_fn_elem_int = use_loss_fn_elem_int
+        self.total_grade = total_grade
+        self.k = k
+        self.use_a = use_a
         self.if_pre_train = if_pre_train
         self.M_t = M_t
         self.M_x = M_x
-        self.use_loss_elem_int = use_loss_elem_int
+        self.run_name = f"seq_Nt{N_t}_Nx{N_x}_lrs{init_lrs[0]}_eps{grade_epochs[0]}_L1reg{L1_regularization}_sig{sigma}_gam{gamma}_Np{N_perturb}_sd{seed}"
+        self.project = project
 
-
-    def train_sequential(self, pre_train_num_iterations=0, train_num_iterations=0, save_loss=True, save_model=True):
+    def train_seq(self, pre_train_num_iterations=0, train_num_iterations=0, save_loss=True, save_model=True):
         """
         Train all segments sequentially, copying the previous segment's parameters to the next.
 
@@ -78,6 +96,14 @@ class SequentialMinMaxOptProb:
             save_loss (bool): Whether to save loss history.
             save_model (bool): Whether to save model parameters.
         """
+        wandb.init(project="seq_minmax_Burgers_standing_shock", 
+                   name=self.run_name, 
+                   config={"num_segments": self.num_segments, 
+                           "pre_train_iters": pre_train_num_iterations,
+                           "train_iters": train_num_iterations,
+                           "seq_T": self.seq_T.tolist()
+                           })
+
         previous_params = None
         for i in range(self.num_segments):
             # Define time interval for the current segment
@@ -96,12 +122,18 @@ class SequentialMinMaxOptProb:
 
             # Create a new MinMaxOptProb instance for this segment
             segment = MinMaxOptProb(
-                N_t=self.N_t, N_x=self.N_x, lr_theta=self.lr_theta, hidden_dims=self.hidden_dims,
-                seed=self.seed, sigma=self.sigma, N_perturb=self.N_perturb, N_bc=self.N_bc, N_ic=self.N_ic,
+                N_t=self.N_t, N_x=self.N_x, hidden_dims_list=self.hidden_dims_list, seed=self.seed, 
+                sigma=self.sigma, N_perturb=self.N_perturb, N_bc=self.N_bc, N_ic=self.N_ic,
                 t_min=t_min, t_max=t_max, x_min=self.x_min, x_max=self.x_max, k_h_rf_times=self.k_h_rf_times,
-                u0=current_u0, u1=self.u1, u2=self.u2, nu=self.nu, res_visc=self.res_visc, res=self.res,
-                use_loss_elem_int=self.use_loss_elem_int,
-                )
+                u0=current_u0, u1=self.u1, u2=self.u2, project=self.project,
+                lambda_ic=self.lambda_ic, lambda_bc=self.lambda_bc, lambda_eqn=self.lambda_eqn, 
+                gamma=self.gamma, alpha=self.alpha, N_test_gamma=self.N_test_gamma, adjust_gamma=self.adjust_gamma,
+                L1_regularization=self.L1_regularization, sampling_method=self.sampling_method, notes=self.notes, lambda_tv=self.lambda_tv,
+                init_lrs=self.init_lrs, grade_epochs=self.grade_epochs, decay_rates=self.decay_rates, 
+                init_lr_stage2=self.init_lr_stage2, epoch_stage2=self.epoch_stage2, decay_rate_stage2=self.decay_rate_stage2,
+                f_adaptive_weight=self.f_adaptive_weight, f_opt_kh=self.f_opt_kh, res=self.res, res_visc=self.res_visc, 
+                use_loss_fn_elem_int=self.use_loss_fn_elem_int, total_grade=self.total_grade, k=self.k, use_a=self.use_a
+            )
 
             # If not the first segment, copy the previous segment's parameters
             # if previous_params is not None:
@@ -124,13 +156,17 @@ class SequentialMinMaxOptProb:
             if pre_train_num_iterations != 0:
                 print(f"\nPre-training segment [{t_min:.4f}, {t_max:.4f}]")
                 segment.pre_train_process(pre_train_num_iterations, save_loss=save_loss, save_model=save_model)
-                plot_loss_history(segment.pre_loss_int_history, segment.pre_loss_bc_history, 'Pre-train Loss History')
+                plot_loss_history(segment.pre_loss_eqn_history, segment.pre_loss_bc_history, 'Pre-train Loss History', segment_idx=i)
+                wandb.log({f"segment_{i}_pre_loss_eqn": np.mean(segment.pre_loss_eqn_history[-100:]),
+                           f"segment_{i}_pre_loss_bc": np.mean(segment.pre_loss_bc_history[-100:])})
 
             # Train the segment
             if train_num_iterations != 0:
                 print(f"\nTraining segment [{t_min:.4f}, {t_max:.4f}]")
                 segment.train_process(train_num_iterations, save_loss=save_loss, save_model=save_model)
-                plot_loss_history(segment.loss_int_history, segment.loss_bc_history, 'Train Loss History')
+                plot_loss_history(segment.loss_eqn_history, segment.loss_bc_history, 'Train Loss History', segment_idx=i)
+                wandb.log({f"segment_{i}_loss_eqn": np.mean(segment.loss_eqn_history[-100:]),
+                           f"segment_{i}_loss_bc": np.mean(segment.loss_bc_history[-100:])})
 
             # Plot after training
             print(f"\nPlotting after training segment [{t_min:.4f}, {t_max:.4f}]")
@@ -155,6 +191,8 @@ class SequentialMinMaxOptProb:
         print("\nPlotting combined output across all segments from t=0 to total_t_max")
         self.plot_combined_u_theta(M_t_per_segment=self.M_t, M_x=self.M_x)
         self.plot_solution_at_time(self.total_t_max)
+
+        wandb.finish()
 
 
     def save_model(self, model_path_prefix):
@@ -195,9 +233,9 @@ class SequentialMinMaxOptProb:
         # Generate time grids for each segment based on self.seq_T
         t_grids = []
         for i in range(self.num_segments):
-            t_start = self.seq_T[i]
-            t_end = self.seq_T[i + 1]
-            t_segment = jnp.linspace(t_start, t_end, M_t_per_segment+1)[:-1]
+            t_min = self.seq_T[i]
+            t_max = self.seq_T[i + 1]
+            t_segment = jnp.linspace(t_min, t_max, M_t_per_segment+1)[:-1]
             t_grids.append(t_segment)
 
         # Concatenate all segment time grids into a full time grid

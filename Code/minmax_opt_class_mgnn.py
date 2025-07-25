@@ -26,12 +26,12 @@ def pytree_l2_norm(pytree):
 
 # Optimizer Class
 class MinMaxOptProb:
-    def __init__(self, N_t=10, N_x=10, hidden_dims_list=[(64, 64), (32, 32), (16, 16)], seed=0, sigma=0.1, N_perturb=5000, N_bc=100, N_ic=100,
-                 t_min=0, t_max=1, x_min=0, x_max=1, k_h_rf_times=2, u0=None, u1=None, u2=None, lambda_bc_static=0.9, project="minmax_opt_mgnn_burgers",
+    def __init__(self, N_t=10, N_x=10, hidden_dims_list=[(64, 64, 64, 64)], seed=0, sigma=0.1, N_perturb=10000, N_bc=128, N_ic=256,
+                 t_min=0, t_max=1, x_min=0, x_max=1, k_h_rf_times=2, u0=None, u1=None, u2=None, project="minmax_mgnn_burgers",
                  lambda_ic=10.0, lambda_bc=10.0, lambda_eqn=1.0, gamma=0.0, alpha=0.9, N_test_gamma = 1000, adjust_gamma=True,
                  L1_regularization=1, sampling_method='normal', notes='', lambda_tv=1.0, 
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
-                 f_adaptive_weight=1000, f_opt_kh=10, res_visc=None, res=None, use_loss_fn_elem_int=True, total_grade=3, k=2, use_a=True):
+                 f_adaptive_weight=1000, f_opt_kh=1, res=None, res_visc=None, use_loss_fn_elem_int=True, total_grade=1, k=0, use_a=True):
         self.pwp = PiecewiseLinearPolynomials(N_t, N_x, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, times=k_h_rf_times)
         self.lb = jnp.array([t_min, x_min])
         self.ub = jnp.array([t_max, x_max])
@@ -49,7 +49,6 @@ class MinMaxOptProb:
         self.u0 = u0
         self.u1 = u1
         self.u2 = u2
-        self.lambda_bc_static = lambda_bc_static
         self.lambda_ic = lambda_ic
         self.lambda_bc = lambda_bc
         self.lambda_eqn = lambda_eqn
