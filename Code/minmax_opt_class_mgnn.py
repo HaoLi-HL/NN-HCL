@@ -186,6 +186,30 @@ class MinMaxOptProb:
         tv_diff = tv_n_plus_1 - tv_n
         tvd_loss = jnp.sum(jnp.maximum(0, tv_diff)**2)
         return tvd_loss
+    
+    # Modified function to compute TV loss with a more efficient approach
+    def modified_compute_tv_loss(self, params):
+        t_points = self.t_points
+        x_points = self.x_points
+
+        def compute_tv(t, params):
+            tx = jnp.stack([t * jnp.ones(self.N_x_pnts), x_points], axis=-1)
+            u = self.u_eval(params, tx)
+            tv = jnp.sum(jnp.abs(u[1:] - u[:-1]))
+            return tv
+
+        def body(carry, n):
+            tv_prev, loss = carry
+            tv_curr = compute_tv(t_points[n+1], params)
+            diff = tv_curr - tv_prev
+            loss += jnp.maximum(0, diff)**2
+            return (tv_curr, loss), None
+
+        initial_tv = compute_tv(t_points[0], params)
+        initial_carry = (initial_tv, 0.0)
+        carry, _ = jax.lax.scan(body, initial_carry, jnp.arange(self.N_t_pnts - 1))
+        tvd_loss = carry[1]
+        return tvd_loss
 
     def loss_fn_elem_int(self, params):
         quad_points = self.pwp.quad_points
@@ -204,7 +228,7 @@ class MinMaxOptProb:
         interior_loss = jnp.dot(quad_weights, integrand)
 
         # Add TV penalty term
-        tv_loss = self.compute_tv_loss(params)
+        tv_loss = self.modified_compute_tv_loss(params)
         total_loss = interior_loss + self.lambda_tv * self.h * tv_loss
         return total_loss
     
