@@ -26,12 +26,21 @@ def pytree_l2_norm(pytree):
 
 # Optimizer Class
 class MinMaxOptProb:
-    def __init__(self, N_t=10, N_x=10, hidden_dims_list=[(64, 64, 64, 64)], seed=0, sigma=0.1, N_perturb=10000, N_bc=128, N_ic=256,
-                 t_min=0, t_max=1, x_min=0, x_max=1, k_h_rf_times=2, u0=None, u1=None, u2=None, project="minmax_mgnn_burgers",
+    def __init__(self, t_min=0, t_max=1, x_min=0, x_max=1, N_t=10, N_x=10, N_bc=128, N_ic=256, hidden_dims_list=[(64, 64, 64, 64)], seed=0, 
+                 sigma=0.1, N_perturb=10000, k_h_rf_times=2, u0=None, u1=None, u2=None, project="minmax_mgnn_burgers",
                  lambda_ic=10.0, lambda_bc=10.0, lambda_eqn=1.0, gamma=0.0, alpha=0.9, N_test_gamma = 1000, adjust_gamma=True,
-                 L1_regularization=1, sampling_method='normal', notes='', lambda_tv=1.0, 
+                 L1reg=1, sampling_method='normal', notes='', lambda_tv=1.0, 
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
-                 f_adaptive_weight=1000, f_opt_kh=1, res=None, res_visc=None, use_loss_fn_elem_int=True, total_grade=1, k=0, use_a=True):
+                 f_adaptive_weight=1000, f_opt_kh=1, res=None, res_visc=None, use_loss_fn_elem_int=True, total_grade=1, k=0, use_a=True,
+                 sqe_train=False, set_wandb=True):
+        self.sqe_train = sqe_train  # Sequential training flag
+        self.set_wandb = set_wandb
+        # if self.sqe_train is True, then we will not create a new wandb run but just use the existing one.
+        # if self.sqe_train is False and self.set_wandb is True, then we will create a new wandb run.
+        
+
+        self.t_min = t_min
+        self.t_max = t_max
         self.pwp = PiecewiseLinearPolynomials(N_t, N_x, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, times=k_h_rf_times)
         self.lb = jnp.array([t_min, x_min])
         self.ub = jnp.array([t_max, x_max])
@@ -75,11 +84,11 @@ class MinMaxOptProb:
         else:
             self.loss_fn = self.loss_fn_lambda
         
-        self.L1_regularization = L1_regularization
+        self.L1reg = L1reg
         self.sampling_method = sampling_method
         self.project = project
         self.notes = notes
-        self.run_name = f"Nt{N_t}_Nx{N_x}_lrs{init_lrs[0]}_eps{grade_epochs[0]}_L1reg{L1_regularization}_sig{sigma}_gam{gamma}_Np{N_perturb}_sd{seed}"
+        self.run_name = f"tmin{t_min}_tmax_{t_max}_Nt{N_t}_Nx{N_x}_lrs{init_lrs[0]}_eps{grade_epochs[0]}_L1reg{L1reg}_sig{sigma}_gam{gamma}_Np{N_perturb}_sd{seed}"
         # Initialize optimizers for each grade of the first stage
         self.init_lrs = init_lrs
         self.grade_epochs = grade_epochs
@@ -106,6 +115,27 @@ class MinMaxOptProb:
         self.optimizer_stage2 = optax.adam(lr_stage2)
         self.opt_state_stage2 = None  # To be initialized later
 
+        if not self.sqe_train and self.set_wandb:
+            wandb.init(project=self.project, name=self.run_name, notes=self.notes,
+                       config={
+                           "total_grade": self.total_grade,
+                           "k": self.k,
+                           "N_t": N_t,
+                           "N_x": N_x,
+                           "init_lrs": init_lrs,
+                           "grade_epochs": grade_epochs,
+                           "decay_rates": decay_rates,
+                           "init_lr_stage2": init_lr_stage2,
+                           "epoch_stage2": epoch_stage2,
+                           "decay_rate_stage2": decay_rate_stage2,
+                           "gamma": gamma,
+                           "f_opt_kh" : f_opt_kh,
+                           "f_adaptive_weight": f_adaptive_weight,
+                           "alpha": alpha,
+                           "N_perturb": N_perturb,
+                           "sigma": sigma,
+                           "L1reg": L1reg
+                       })
         self.gen_funcs()
 
     def gen_ibc(self):
@@ -221,8 +251,8 @@ class MinMaxOptProb:
         k_h_quad = p_coeffs_quad[:, 0] + p_coeffs_quad[:, 1] * quad_points[:, 0] + p_coeffs_quad[:, 2] * quad_points[:, 1]
         integrand = residual * jnp.sign(u_quad - k_h_quad)
 
-        if self.L1_regularization > 0:
-            integrand += self.L1_regularization * jnp.abs(self.h * residual)
+        if self.L1reg > 0:
+            integrand += self.L1reg * jnp.abs(self.h * residual)
             
         interior_loss = jnp.dot(quad_weights, integrand)
 
@@ -312,21 +342,6 @@ class MinMaxOptProb:
         print("\nStarting Train Stage with MGDL")
         start_time = time.perf_counter()
         self.global_step = 0
-        wandb.init(project=self.project, name=self.run_name, notes=self.notes,
-                   config={
-                    "total_grade": self.total_grade,
-                    "k": self.k,
-                    "hidden_dims_list": self.model.hidden_dims_list,
-                    "lrs": self.init_lrs,
-                    "epochs": self.grade_epochs,
-                    "decay_rates": self.decay_rates,
-                    "lr_2ndstage": self.init_lr_stage2,
-                    "epoch_2ndstage": self.epoch_stage2,
-                    "decay_rate": self.decay_rate_stage2,
-                    "f_adaptive_weight": self.f_adaptive_weight,
-                    "f_opt_kh" : self.f_opt_kh,
-                    })
-
         # Stage 1: Sequential Grade Training
         print("\nStage 1: Sequential Grade Training")
         self.loss_eqn_history = [[] for _ in range(self.total_grade)]
@@ -364,7 +379,8 @@ class MinMaxOptProb:
 
                 if iter % 100 == 0:
                     print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_eqn_from_kh: {loss_eqn_from_kh:.6f}, loss_eqn_abs: {loss_eqn_abs:.6f}, loss_ibc: {loss_ibc:.6f}")
-                    wandb.log({f"grade_{grade_idx}_loss_eqn": loss_eqn, f"grade_{grade_idx}_loss_ibc": loss_ibc, "step": self.global_step + iter})
+                    if self.set_wandb:
+                        wandb.log({f"tmin_{self.t_min}tmin_{self.t_max}_grade_{grade_idx}_loss_eqn": loss_eqn, f"grade_{grade_idx}_loss_ibc": loss_ibc, "step": self.global_step + iter})
                 self.model.mlps[grade_idx].params = params
                 self.opt_state_list[grade_idx] = opt_state
 
@@ -412,7 +428,8 @@ class MinMaxOptProb:
                         best_params_last_k = jax.tree_util.tree_map(jnp.copy, params_last_k)
                 if iter % 100 == 0:
                     print(f"Stage 2, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_ibc: {loss_ibc:.6f}")
-                    wandb.log({"second_stage_loss_eqn": loss_eqn, "second_stage_loss_ibc": loss_ibc, "step": self.global_step + iter})
+                    if self.set_wandb:
+                        wandb.log({"second_stage_loss_eqn": loss_eqn, "second_stage_loss_ibc": loss_ibc, "step": self.global_step + iter})
             # Assign the best params found in the last 10%
             if best_params_last_k is not None:
                 params_last_k = best_params_last_k
@@ -430,8 +447,8 @@ class MinMaxOptProb:
             model_path = os.path.join('data', f'trained_model_{self.run_name}_{timestamp}.pkl')
             self.save_model(model_path)
             print(f"Train model saved to {model_path}")
-
-        wandb.finish()
+        if not self.seque_train and self.set_wandb:
+            wandb.finish()
         
         
     def update_adaptive_weights(self, params):

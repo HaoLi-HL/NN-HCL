@@ -12,16 +12,14 @@ import wandb
 
 
 
-
 class SeqMinMaxOptProb:
-    def __init__(self, num_segments, total_t_min, total_t_max, seq_T=None, N_t=10, N_x=10, hidden_dims_list=[(64, 64, 64, 64)],
-                 seed=0, sigma=0.1, N_perturb=10000, N_bc=2048, N_ic=4096, 
-                 x_min=0, x_max=1, k_h_rf_times=2, u0=None, u1=None, u2=None, project="seq_minmax_mgnn_burgers",
-                 lambda_ic=10.0, lambda_bc=10.0, lambda_eqn=1.0, gamma=0.0, alpha=0.9, N_test_gamma=1000, adjust_gamma=True,
-                 L1_regularization=1, sampling_method='normal', notes='', lambda_tv=1.0, 
+    def __init__(self, num_segments, total_t_min, total_t_max, x_min=0, x_max=1, seq_T=None, N_t=10, N_x=10, N_bc=2048, N_ic=4096, hidden_dims_list=[(64, 64, 64, 64)], seed=0, 
+                 sigma=0.1, N_perturb=10000, k_h_rf_times=2, u0=None, u1=None, u2=None, project="seq_minmax_burgers",
+                 lambda_ic=10.0, lambda_bc=10.0, lambda_eqn=1.0, alpha=0.9, gamma=0.0, N_test_gamma=1000, adjust_gamma=True,
+                 L1reg=0, sampling_method='normal', notes='', lambda_tv=1.0, 
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
-                 f_adaptive_weight=1000, f_opt_kh=10, res=None, res_visc=None, use_loss_fn_elem_int=True, total_grade=1, k=0, use_a=True,
-                 if_pre_train=False, M_t=1000, M_x=2000):
+                 f_adaptive_weight=1000, f_opt_kh=1, res=None, res_visc=None, use_loss_fn_elem_int=True, total_grade=1, k=0, use_a=True,
+                 if_pre_train=False, M_t=1000, M_x=2000, set_wandb=True):
         """
         Initialize the sequential training class.
 
@@ -33,6 +31,7 @@ class SeqMinMaxOptProb:
             u2 (callable): Boundary condition at x_max.
             ... (other parameters passed to MinMaxOptProb)
         """
+        self.set_wandb = set_wandb
         
         self.total_t_min = total_t_min
         self.total_t_max = total_t_max
@@ -62,7 +61,7 @@ class SeqMinMaxOptProb:
         self.alpha = alpha
         self.N_test_gamma = N_test_gamma
         self.adjust_gamma = adjust_gamma
-        self.L1_regularization = L1_regularization
+        self.L1reg = L1reg
         self.sampling_method = sampling_method
         self.notes = notes
         self.lambda_tv = lambda_tv
@@ -83,8 +82,34 @@ class SeqMinMaxOptProb:
         self.if_pre_train = if_pre_train
         self.M_t = M_t
         self.M_x = M_x
-        self.run_name = f"seq_Nt{N_t}_Nx{N_x}_lrs{init_lrs[0]}_eps{grade_epochs[0]}_L1reg{L1_regularization}_sig{sigma}_gam{gamma}_Np{N_perturb}_sd{seed}"
-        self.project = project
+        self.run_name = f"seq_tmin_{total_t_min}_tmax{total_t_max}_Nt{N_t}_Nx{N_x}_lrs{init_lrs[0]}_eps{grade_epochs[0]}_L1reg{L1reg}_sig{sigma}_gam{gamma}_Np{N_perturb}_sd{seed}"
+        if self.set_wandb:
+            self.project = project
+            wandb.init(project=self.project, 
+                       name=self.run_name, 
+                       config={"num_segments": self.num_segments, 
+                               "total_t_min": self.total_t_min,
+                               "total_t_max": self.total_t_max,
+                               "seq_T": self.seq_T.tolist(),
+                               "N_t": N_t,
+                               "N_x": N_x,
+                               "N_bc": N_bc,
+                               "N_ic": N_ic,
+                               "hidden_dims_list": hidden_dims_list,
+                               "seed": seed,
+                               "sigma": sigma,
+                               "N_perturb": N_perturb,
+                               "k_h_rf_times": k_h_rf_times,
+                               "lambda_ic": lambda_ic,
+                               "lambda_bc": lambda_bc,
+                               "lambda_eqn": lambda_eqn,
+                               "gamma": gamma,
+                               "alpha": alpha,
+                               "N_test_gamma": N_test_gamma,
+                               "adjust_gamma": adjust_gamma,
+                               "L1reg": L1reg,
+                               "sampling_method": sampling_method
+                              })
 
     def train_seq(self, pre_train_num_iterations=0, train_num_iterations=0, save_loss=True, save_model=True):
         """
@@ -122,17 +147,15 @@ class SeqMinMaxOptProb:
 
             # Create a new MinMaxOptProb instance for this segment
             segment = MinMaxOptProb(
-                N_t=self.N_t, N_x=self.N_x, hidden_dims_list=self.hidden_dims_list, seed=self.seed, 
-                sigma=self.sigma, N_perturb=self.N_perturb, N_bc=self.N_bc, N_ic=self.N_ic,
-                t_min=t_min, t_max=t_max, x_min=self.x_min, x_max=self.x_max, k_h_rf_times=self.k_h_rf_times,
-                u0=current_u0, u1=self.u1, u2=self.u2, project=self.project,
-                lambda_ic=self.lambda_ic, lambda_bc=self.lambda_bc, lambda_eqn=self.lambda_eqn, 
+                t_min=t_min, t_max=t_max, x_min=self.x_min, x_max=self.x_max, N_t=self.N_t, N_x=self.N_x, 
+                N_bc=self.N_bc, N_ic=self.N_ic, hidden_dims_list=self.hidden_dims_list, seed=self.seed, 
+                sigma=self.sigma, N_perturb=self.N_perturb, k_h_rf_times=self.k_h_rf_times, u0=current_u0, u1=self.u1, u2=self.u2, project=self.project,
                 gamma=self.gamma, alpha=self.alpha, N_test_gamma=self.N_test_gamma, adjust_gamma=self.adjust_gamma,
-                L1_regularization=self.L1_regularization, sampling_method=self.sampling_method, notes=self.notes, lambda_tv=self.lambda_tv,
+                L1reg=self.L1reg, sampling_method=self.sampling_method, notes=self.notes, lambda_tv=self.lambda_tv,
                 init_lrs=self.init_lrs, grade_epochs=self.grade_epochs, decay_rates=self.decay_rates, 
                 init_lr_stage2=self.init_lr_stage2, epoch_stage2=self.epoch_stage2, decay_rate_stage2=self.decay_rate_stage2,
                 f_adaptive_weight=self.f_adaptive_weight, f_opt_kh=self.f_opt_kh, res=self.res, res_visc=self.res_visc, 
-                use_loss_fn_elem_int=self.use_loss_fn_elem_int, total_grade=self.total_grade, k=self.k, use_a=self.use_a
+                use_loss_fn_elem_int=self.use_loss_fn_elem_int, total_grade=self.total_grade, k=self.k, use_a=self.use_a, sqe_train=True, set_wandb=self.set_wandb
             )
 
             # If not the first segment, copy the previous segment's parameters
@@ -152,13 +175,13 @@ class SeqMinMaxOptProb:
                 x_max=self.x_max
             )
 
-            # Pre-train the segment
-            if pre_train_num_iterations != 0:
-                print(f"\nPre-training segment [{t_min:.4f}, {t_max:.4f}]")
-                segment.pre_train_process(pre_train_num_iterations, save_loss=save_loss, save_model=save_model)
-                plot_loss_history(segment.pre_loss_eqn_history, segment.pre_loss_bc_history, 'Pre-train Loss History', segment_idx=i)
-                wandb.log({f"segment_{i}_pre_loss_eqn": np.mean(segment.pre_loss_eqn_history[-100:]),
-                           f"segment_{i}_pre_loss_bc": np.mean(segment.pre_loss_bc_history[-100:])})
+            # # Pre-train the segment
+            # if pre_train_num_iterations != 0:
+            #     print(f"\nPre-training segment [{t_min:.4f}, {t_max:.4f}]")
+            #     segment.pre_train_process(pre_train_num_iterations, save_loss=save_loss, save_model=save_model)
+            #     plot_loss_history(segment.pre_loss_eqn_history, segment.pre_loss_bc_history, 'Pre-train Loss History', segment_idx=i)
+            #     wandb.log({f"segment_{i}_pre_loss_eqn": np.mean(segment.pre_loss_eqn_history[-100:]),
+            #                f"segment_{i}_pre_loss_bc": np.mean(segment.pre_loss_bc_history[-100:])})
 
             # Train the segment
             if train_num_iterations != 0:
