@@ -81,11 +81,11 @@ class SeqMinMaxOptProb:
         self.use_a = use_a
         self.M_t = M_t
         self.M_x = M_x
-        self.run_name = f"tmin_{total_t_min:.1f}_tmax{total_t_max:.1f}N{num_segments}_Nt{N_t}_Nx{N_x}_lrs{init_lrs[0]}_eps{grade_epochs[0]}_L1reg{L1reg}_sig{sigma}_gam{gamma}_Np{N_perturb}_sd{seed}"
+        self.run_name = f"tmin_{total_t_min:.1f}_tmax{total_t_max:.1f}_N{num_segments}_Nt{N_t}_Nx{N_x}_lrs{init_lrs[0]}_eps{grade_epochs[0]}_L1reg{L1reg}_sig{sigma}_gam{gamma}_Np{N_perturb}_sd{seed}"
         self.project = project
         if self.set_wandb:
             wandb.init(project=self.project, 
-                       name=self.run_name, 
+                       name=self.run_name,
                        config={"num_segments": self.num_segments, 
                                "total_t_min": self.total_t_min,
                                "total_t_max": self.total_t_max,

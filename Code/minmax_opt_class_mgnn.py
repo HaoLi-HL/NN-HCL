@@ -88,7 +88,7 @@ class MinMaxOptProb:
         self.sampling_method = sampling_method
         self.project = project
         self.notes = notes
-        self.run_name = f"tmin{t_min:.2f}_tmax_{t_max:.2f}_Nt{N_t}_Nx{N_x}_lrs{init_lrs[0]}_eps{grade_epochs[0]}_L1reg{L1reg}_sig{sigma}_gam{gamma}_Np{N_perturb}_sd{seed}"
+        self.run_name = f"tmin{t_min:.1f}_tmax_{t_max:.1f}_Nt{N_t}_Nx{N_x}_lrs{init_lrs[0]}_eps{grade_epochs[0]}_L1reg{L1reg}_sig{sigma}_gam{gamma}_Np{N_perturb}_sd{seed}"
         # Initialize optimizers for each grade of the first stage
         self.init_lrs = init_lrs
         self.grade_epochs = grade_epochs
@@ -380,7 +380,9 @@ class MinMaxOptProb:
                 if iter % 100 == 0:
                     print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_eqn_from_kh: {loss_eqn_from_kh:.6f}, loss_eqn_abs: {loss_eqn_abs:.6f}, loss_ibc: {loss_ibc:.6f}")
                     if self.set_wandb:
-                        wandb.log({f"grade_{grade_idx}_loss_eqn": loss_eqn, f"grade_{grade_idx}_loss_ibc": loss_ibc, "step": self.global_step + iter})
+                        wandb.log({f"tmin{self.t_min:.1f}_tmax_{self.t_max:.1f}_grade_{grade_idx}_loss_eqn": loss_eqn, 
+                                   f"tmin{self.t_min:.1f}_tmax_{self.t_max:.1f}_grade_{grade_idx}_loss_ibc": loss_ibc, 
+                                   f"step": self.global_step + iter})
                 self.model.mlps[grade_idx].params = params
                 self.opt_state_list[grade_idx] = opt_state
 
@@ -429,7 +431,9 @@ class MinMaxOptProb:
                 if iter % 100 == 0:
                     print(f"Stage 2, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_ibc: {loss_ibc:.6f}")
                     if self.set_wandb:
-                        wandb.log({"second_stage_loss_eqn": loss_eqn, "second_stage_loss_ibc": loss_ibc, "step": self.global_step + iter})
+                        wandb.log({f"tmin{self.t_min:.1f}_tmax_{self.t_max:.1f}_second_stage_loss_eqn": loss_eqn, 
+                                   f"tmin{self.t_min:.1f}_tmax_{self.t_max:.1f}_second_stage_loss_ibc": loss_ibc, 
+                                   f"step": self.global_step + iter})
             # Assign the best params found in the last 10%
             if best_params_last_k is not None:
                 params_last_k = best_params_last_k
