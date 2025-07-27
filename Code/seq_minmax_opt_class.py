@@ -14,11 +14,11 @@ import wandb
 
 class SeqMinMaxOptProb:
     def __init__(self, num_segments, total_t_min, total_t_max, x_min=0, x_max=1, seq_T=None, N_t=10, N_x=10, N_bc=2048, N_ic=4096, hidden_dims_list=[(64, 64, 64, 64)], seed=0, 
-                 sigma=0.1, N_perturb=10000, k_h_rf_times=2, u0=None, u1=None, u2=None, project="seq_minmax_burgers",
+                 sigma=0.1, N_perturb=10000, k_h_rf_times=2, f_adaptive_weight=1000, f_opt_kh=1, u0=None, u1=None, u2=None, project="seq_minmax_burgers",
                  lambda_ic=10.0, lambda_bc=10.0, lambda_eqn=1.0, alpha=0.9, gamma=0.0, N_test_gamma=1000, adjust_gamma=True,
                  L1reg=0, sampling_method='normal', notes='', lambda_tv=1.0, 
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
-                 f_adaptive_weight=1000, f_opt_kh=1, res=None, res_visc=None, use_loss_fn_elem_int=True, total_grade=1, k=0, use_a=True,
+                 res=None, res_visc=None, use_loss_fn_elem_int=True, total_grade=1, k=0, use_a=True,
                  M_t=1000, M_x=2000, set_wandb=True):
         """
         Initialize the sequential training class.
@@ -258,15 +258,16 @@ class SeqMinMaxOptProb:
         u_values_full = u_values_full.reshape(len(t_grid_full), M_x)
 
         # Create the plot
-        height = (self.total_t_max - self.total_t_min) * 3
-        width = (self.x_max - self.x_min) * 3 + 1
+        height = (self.total_t_max - self.total_t_min) * 8
+        width = (self.x_max - self.x_min) * 8 + 2
         plt.figure(figsize=(width, height))
         plt.pcolormesh(x_grid, t_grid_full, u_values_full, shading='nearest', cmap='viridis')
         plt.colorbar(label='$u_\\theta(t, x)$')
         plt.xlabel('x')
         plt.ylabel('t')
-        plt.title(f'Combined Neural Network Function $u_\\theta$ over [{self.total_t_min}, {self.total_t_max}]')
+        plt.title(f'Combined Neural Network $u_\\theta$ over [{self.total_t_min}, {self.total_t_max}]')
         plt.show()
+        
 
     def plot_solution_at_time(self, T, M_x=1000):
         """
