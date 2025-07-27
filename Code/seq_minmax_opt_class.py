@@ -5,7 +5,7 @@ import optax
 from datetime import datetime
 import os
 import pickle
-from minmax_opt_class import MinMaxOptProb
+from minmax_opt_class_mgnn import MinMaxOptProb
 from my_helpers import plot_u_theta, plot_loss_history
 import matplotlib.pyplot as plt
 import wandb
@@ -19,7 +19,7 @@ class SeqMinMaxOptProb:
                  L1reg=0, sampling_method='normal', notes='', lambda_tv=1.0, 
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  f_adaptive_weight=1000, f_opt_kh=1, res=None, res_visc=None, use_loss_fn_elem_int=True, total_grade=1, k=0, use_a=True,
-                 if_pre_train=False, M_t=1000, M_x=2000, set_wandb=True):
+                 M_t=1000, M_x=2000, set_wandb=True):
         """
         Initialize the sequential training class.
 
@@ -79,12 +79,11 @@ class SeqMinMaxOptProb:
         self.total_grade = total_grade
         self.k = k
         self.use_a = use_a
-        self.if_pre_train = if_pre_train
         self.M_t = M_t
         self.M_x = M_x
-        self.run_name = f"seq_tmin_{total_t_min}_tmax{total_t_max}_Nt{N_t}_Nx{N_x}_lrs{init_lrs[0]}_eps{grade_epochs[0]}_L1reg{L1reg}_sig{sigma}_gam{gamma}_Np{N_perturb}_sd{seed}"
+        self.run_name = f"tmin_{total_t_min:.1f}_tmax{total_t_max:.1f}N{num_segments}_Nt{N_t}_Nx{N_x}_lrs{init_lrs[0]}_eps{grade_epochs[0]}_L1reg{L1reg}_sig{sigma}_gam{gamma}_Np{N_perturb}_sd{seed}"
+        self.project = project
         if self.set_wandb:
-            self.project = project
             wandb.init(project=self.project, 
                        name=self.run_name, 
                        config={"num_segments": self.num_segments, 
@@ -111,25 +110,14 @@ class SeqMinMaxOptProb:
                                "sampling_method": sampling_method
                               })
 
-    def train_seq(self, pre_train_num_iterations=0, train_num_iterations=0, save_loss=True, save_model=True):
+    def train_seq(self, save_model=True):
         """
         Train all segments sequentially, copying the previous segment's parameters to the next.
 
         Args:
-            pre_train_num_iterations (int): Number of pre-training iterations per segment.
-            train_num_iterations (int): Number of training iterations per segment.
-            save_loss (bool): Whether to save loss history.
             save_model (bool): Whether to save model parameters.
         """
-        wandb.init(project="seq_minmax_Burgers_standing_shock", 
-                   name=self.run_name, 
-                   config={"num_segments": self.num_segments, 
-                           "pre_train_iters": pre_train_num_iterations,
-                           "train_iters": train_num_iterations,
-                           "seq_T": self.seq_T.tolist()
-                           })
 
-        previous_params = None
         for i in range(self.num_segments):
             # Define time interval for the current segment
             t_min = self.seq_T[i]
@@ -140,8 +128,7 @@ class SeqMinMaxOptProb:
                 current_u0 = self.u0
             else:
                 prev_segment = self.segments[i - 1]
-                current_u0 = lambda x: prev_segment.model(
-                    prev_segment.params,
+                current_u0 = lambda x: prev_segment.model.forward(
                     jnp.stack([jnp.ones_like(x) * prev_segment.pwp.t_max, x], axis=1)
                 )
 
@@ -155,18 +142,13 @@ class SeqMinMaxOptProb:
                 init_lrs=self.init_lrs, grade_epochs=self.grade_epochs, decay_rates=self.decay_rates, 
                 init_lr_stage2=self.init_lr_stage2, epoch_stage2=self.epoch_stage2, decay_rate_stage2=self.decay_rate_stage2,
                 f_adaptive_weight=self.f_adaptive_weight, f_opt_kh=self.f_opt_kh, res=self.res, res_visc=self.res_visc, 
-                use_loss_fn_elem_int=self.use_loss_fn_elem_int, total_grade=self.total_grade, k=self.k, use_a=self.use_a, sqe_train=True, set_wandb=self.set_wandb
+                use_loss_fn_elem_int=self.use_loss_fn_elem_int, total_grade=self.total_grade, k=self.k, use_a=self.use_a, seq_train=True, set_wandb=self.set_wandb
             )
-
-            # If not the first segment, copy the previous segment's parameters
-            # if previous_params is not None:
-            #     segment.set_params(previous_params)
 
             # Plot before training
             print(f"\nPlotting before training segment [{t_min:.4f}, {t_max:.4f}]")
             plot_u_theta(
                 model=segment.model,
-                params=segment.params,
                 M_t=self.M_t,
                 M_x=self.M_x,
                 t_min=t_min,
@@ -175,27 +157,15 @@ class SeqMinMaxOptProb:
                 x_max=self.x_max
             )
 
-            # # Pre-train the segment
-            # if pre_train_num_iterations != 0:
-            #     print(f"\nPre-training segment [{t_min:.4f}, {t_max:.4f}]")
-            #     segment.pre_train_process(pre_train_num_iterations, save_loss=save_loss, save_model=save_model)
-            #     plot_loss_history(segment.pre_loss_eqn_history, segment.pre_loss_bc_history, 'Pre-train Loss History', segment_idx=i)
-            #     wandb.log({f"segment_{i}_pre_loss_eqn": np.mean(segment.pre_loss_eqn_history[-100:]),
-            #                f"segment_{i}_pre_loss_bc": np.mean(segment.pre_loss_bc_history[-100:])})
-
             # Train the segment
-            if train_num_iterations != 0:
-                print(f"\nTraining segment [{t_min:.4f}, {t_max:.4f}]")
-                segment.train_process(train_num_iterations, save_loss=save_loss, save_model=save_model)
-                plot_loss_history(segment.loss_eqn_history, segment.loss_bc_history, 'Train Loss History', segment_idx=i)
-                wandb.log({f"segment_{i}_loss_eqn": np.mean(segment.loss_eqn_history[-100:]),
-                           f"segment_{i}_loss_bc": np.mean(segment.loss_bc_history[-100:])})
+            print(f"\nTraining segment [{t_min:.4f}, {t_max:.4f}]")
+            segment.train_process_stage1()
+            segment.train_process_stage2()
 
             # Plot after training
             print(f"\nPlotting after training segment [{t_min:.4f}, {t_max:.4f}]")
             plot_u_theta(
                 model=segment.model,
-                params=segment.params,
                 M_t=self.M_t,
                 M_x=self.M_x,
                 t_min=t_min,
@@ -206,9 +176,6 @@ class SeqMinMaxOptProb:
 
             # Store the segment and update previous_params with the trained parameters
             self.segments.append(segment)
-            # previous_params = segment.params
-            # previous_lb = segment.model.lb
-            # previous_ub = segment.model.ub
 
         # After training all segments, plot the combined output
         print("\nPlotting combined output across all segments from t=0 to total_t_max")
@@ -245,7 +212,7 @@ class SeqMinMaxOptProb:
             segment.load_model(model_path)
             print(f"Loaded segment {i} model from {model_path}")
     
-    def plot_combined_u_theta(self, M_t_per_segment=500, M_x=500):
+    def plot_combined_u_theta(self, M_t_per_segment=1000, M_x=2000):
         """
         Plot the combined output of all trained segments over the full time domain [0, total_t_max].
 
@@ -283,7 +250,7 @@ class SeqMinMaxOptProb:
             tx_points_segment = tx_points_full[mask]
             if tx_points_segment.size > 0:
                 segment = self.segments[i]
-                u_values_segment = segment.model(segment.params, tx_points_segment)
+                u_values_segment = segment.model.forward(tx_points_segment)
                 u_values_full.append(u_values_segment)
 
         # Combine all segment outputs into a single array
@@ -301,7 +268,7 @@ class SeqMinMaxOptProb:
         plt.title(f'Combined Neural Network Function $u_\\theta$ over [{self.total_t_min}, {self.total_t_max}]')
         plt.show()
 
-    def plot_solution_at_time(self, T, M_x=100):
+    def plot_solution_at_time(self, T, M_x=1000):
         """
         Plot the solution u_theta at a specific time T.
 
@@ -330,7 +297,7 @@ class SeqMinMaxOptProb:
         tx_points = jnp.stack([t_fixed, x_grid], axis=1)  # Shape: (M_x, 2)
 
         # Evaluate the neural network at these points
-        u_values = segment.model(segment.params, tx_points)  # Shape: (M_x,)
+        u_values = segment.model.forward(tx_points)  # Shape: (M_x,)
 
         # Plot the solution
         plt.figure(figsize=(8, 6))

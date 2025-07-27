@@ -32,11 +32,11 @@ class MinMaxOptProb:
                  L1reg=1, sampling_method='normal', notes='', lambda_tv=1.0, 
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  f_adaptive_weight=1000, f_opt_kh=1, res=None, res_visc=None, use_loss_fn_elem_int=True, total_grade=1, k=0, use_a=True,
-                 sqe_train=False, set_wandb=True):
-        self.sqe_train = sqe_train  # Sequential training flag
+                 seq_train=False, set_wandb=True):
+        self.seq_train = seq_train  # Sequential training flag
         self.set_wandb = set_wandb
-        # if self.sqe_train is True, then we will not create a new wandb run but just use the existing one.
-        # if self.sqe_train is False and self.set_wandb is True, then we will create a new wandb run.
+        # if self.seq_train is True, then we will not create a new wandb run but just use the existing one.
+        # if self.seq_train is False and self.set_wandb is True, then we will create a new wandb run.
         
 
         self.t_min = t_min
@@ -88,7 +88,7 @@ class MinMaxOptProb:
         self.sampling_method = sampling_method
         self.project = project
         self.notes = notes
-        self.run_name = f"tmin{t_min}_tmax_{t_max}_Nt{N_t}_Nx{N_x}_lrs{init_lrs[0]}_eps{grade_epochs[0]}_L1reg{L1reg}_sig{sigma}_gam{gamma}_Np{N_perturb}_sd{seed}"
+        self.run_name = f"tmin{t_min:.2f}_tmax_{t_max:.2f}_Nt{N_t}_Nx{N_x}_lrs{init_lrs[0]}_eps{grade_epochs[0]}_L1reg{L1reg}_sig{sigma}_gam{gamma}_Np{N_perturb}_sd{seed}"
         # Initialize optimizers for each grade of the first stage
         self.init_lrs = init_lrs
         self.grade_epochs = grade_epochs
@@ -115,7 +115,7 @@ class MinMaxOptProb:
         self.optimizer_stage2 = optax.adam(lr_stage2)
         self.opt_state_stage2 = None  # To be initialized later
 
-        if not self.sqe_train and self.set_wandb:
+        if not self.seq_train and self.set_wandb:
             wandb.init(project=self.project, name=self.run_name, notes=self.notes,
                        config={
                            "total_grade": self.total_grade,
@@ -257,7 +257,7 @@ class MinMaxOptProb:
         interior_loss = jnp.dot(quad_weights, integrand)
 
         # Add TV penalty term
-        tv_loss = self.modified_compute_tv_loss(params)
+        tv_loss = self.compute_tv_loss(params)
         total_loss = interior_loss + self.lambda_tv * self.h * tv_loss
         return total_loss
     
@@ -380,7 +380,7 @@ class MinMaxOptProb:
                 if iter % 100 == 0:
                     print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_eqn_from_kh: {loss_eqn_from_kh:.6f}, loss_eqn_abs: {loss_eqn_abs:.6f}, loss_ibc: {loss_ibc:.6f}")
                     if self.set_wandb:
-                        wandb.log({f"tmin_{self.t_min}tmin_{self.t_max}_grade_{grade_idx}_loss_eqn": loss_eqn, f"grade_{grade_idx}_loss_ibc": loss_ibc, "step": self.global_step + iter})
+                        wandb.log({f"grade_{grade_idx}_loss_eqn": loss_eqn, f"grade_{grade_idx}_loss_ibc": loss_ibc, "step": self.global_step + iter})
                 self.model.mlps[grade_idx].params = params
                 self.opt_state_list[grade_idx] = opt_state
 
@@ -447,7 +447,7 @@ class MinMaxOptProb:
             model_path = os.path.join('data', f'trained_model_{self.run_name}_{timestamp}.pkl')
             self.save_model(model_path)
             print(f"Train model saved to {model_path}")
-        if not self.seque_train and self.set_wandb:
+        if not self.seq_train and self.set_wandb:
             wandb.finish()
         
         
