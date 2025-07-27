@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from flax import linen as nn
 from NN_class import MLP
+from jax import vmap
 
 
 def plot_loss_history(loss_int, loss_bc, title):
@@ -84,9 +85,6 @@ def plot_u_theta(model, params=None, M_t=100, M_x=100, t_min=0.0, t_max=1.0, x_m
         ax.set_title(f'Neural Network Function at t = {t_val:.2f} (closest t = {t_grid[idx]:.2f})')
         plt.tight_layout()
         plt.show()
-import matplotlib.pyplot as plt
-import jax.numpy as jnp
-from jax import vmap
 
 def plot_kh(pwp, M_factor=10):
     """

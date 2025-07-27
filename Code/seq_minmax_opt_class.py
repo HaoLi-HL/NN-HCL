@@ -147,9 +147,6 @@ class SequentialMinMaxOptProb:
 
             # Store the segment and update previous_params with the trained parameters
             self.segments.append(segment)
-            # previous_params = segment.params
-            # previous_lb = segment.model.lb
-            # previous_ub = segment.model.ub
 
         # After training all segments, plot the combined output
         print("\nPlotting combined output across all segments from t=0 to total_t_max")
