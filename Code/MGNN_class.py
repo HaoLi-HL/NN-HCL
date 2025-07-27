@@ -121,6 +121,7 @@ class MG_NN:
 
     def add_grade(self):
         """Add a new grade to the network."""
+        print(f"Adding grade {self.current_grade + 1} with hidden dims {self.hidden_dims_list[self.current_grade]}")
         if self.current_grade == 0:
             # First grade: takes original input_dim, with normalization
             mlp = MLP(input_dim=self.input_dim,

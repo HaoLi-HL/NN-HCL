@@ -1,0 +1,41 @@
+{
+  "os":  "macOS-15.5-arm64-arm-64bit",
+  "python":  "CPython 3.10.18",
+  "startedAt":  "2025-07-21T11:20:29.461934Z",
+  "program":  "Desktop/Conservation_law/NN-HCL/Code/minmax_opt_mgnn_burgers-Copy7.ipynb",
+  "git":  {
+    "remote":  "git@github.com:CodeConverge/NN-HCL.git",
+    "commit":  "62904a378c7bb5619f05abd0fecb71063f8389cb"
+  },
+  "email":  "lihao199408@gmail.com",
+  "root":  "/Users/haoli/Desktop/Conservation_law/NN-HCL/Code",
+  "host":  "Mac-Studio.local",
+  "executable":  "/Users/haoli/miniconda3/envs/jax-metal/bin/python",
+  "cpu_count":  16,
+  "cpu_count_logical":  16,
+  "disk":  {
+    "/":  {
+      "total":  "994662584320",
+      "used":  "82132541440"
+    },
+    "/System/Volumes/Data":  {
+      "total":  "994662584320",
+      "used":  "82132541440"
+    }
+  },
+  "memory":  {
+    "total":  "137438953472"
+  },
+  "cpu":  {
+    "count":  16,
+    "countLogical":  16
+  },
+  "apple":  {
+    "name":  "Apple M4 Max",
+    "ecpuCores":  4,
+    "pcpuCores":  12,
+    "gpuCores":  40,
+    "memoryGb":  128,
+    "ramTotalBytes":  "137438953472"
+  }
+}

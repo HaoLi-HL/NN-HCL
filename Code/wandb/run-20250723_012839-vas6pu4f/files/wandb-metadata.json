@@ -1,0 +1,41 @@
+{
+  "os":  "macOS-15.5-arm64-arm-64bit",
+  "python":  "CPython 3.10.18",
+  "startedAt":  "2025-07-22T17:28:39.851284Z",
+  "program":  "Desktop/Conservation_law/NN-HCL/Code/HCL_cubic_flux-Copy1.ipynb",
+  "git":  {
+    "remote":  "git@github.com:CodeConverge/NN-HCL.git",
+    "commit":  "1736dc02cad6c574c3e9c5b2c7df29cc5844ae86"
+  },
+  "email":  "lihao199408@gmail.com",
+  "root":  "/Users/haoli/Desktop/Conservation_law/NN-HCL/Code",
+  "host":  "Mac-Studio.local",
+  "executable":  "/Users/haoli/miniconda3/envs/jax-metal/bin/python",
+  "cpu_count":  16,
+  "cpu_count_logical":  16,
+  "disk":  {
+    "/":  {
+      "total":  "994662584320",
+      "used":  "82781343744"
+    },
+    "/System/Volumes/Data":  {
+      "total":  "994662584320",
+      "used":  "82781343744"
+    }
+  },
+  "memory":  {
+    "total":  "137438953472"
+  },
+  "cpu":  {
+    "count":  16,
+    "countLogical":  16
+  },
+  "apple":  {
+    "name":  "Apple M4 Max",
+    "ecpuCores":  4,
+    "pcpuCores":  12,
+    "gpuCores":  40,
+    "memoryGb":  128,
+    "ramTotalBytes":  "137438953472"
+  }
+}
