@@ -9,6 +9,8 @@ from minmax_opt_class_mgnn import MinMaxOptProb
 from my_helpers import plot_u_theta, plot_loss_history
 import matplotlib.pyplot as plt
 import wandb
+import matplotlib.gridspec as gridspec
+
 
 
 
@@ -213,7 +215,7 @@ class SeqMinMaxOptProb:
             segment = self.segments[i]
             segment.load_model(model_path)
             print(f"Loaded segment {i} model from {model_path}")
-    
+''' 
     def plot_combined_u_theta(self, M_t_per_segment=1000, M_x=2000, upload_fig=False):
         """
         Plot the combined output of all trained segments over the full time domain [0, total_t_max].
@@ -315,4 +317,83 @@ class SeqMinMaxOptProb:
         # Upload the figure to wandb
         if upload_fig:
             wandb.log({"combined_u_theta_plot": wandb.Image(fig)})
+        plt.show()
+''' 
+
+    def plot_combined_u_theta(self, M_t_per_segment=1000, M_x=2000, upload_fig=False):
+        """
+        Plot the combined output of all trained segments over the full time domain [0, total_t_max].
+
+        Args:
+            M_t_per_segment (int): Number of grid points in t per segment.
+            M_x (int): Number of grid points in x.
+        """
+        # Generate time grids for each segment based on self.seq_T
+        t_grids = []
+        for i in range(self.num_segments):
+            t_min = self.seq_T[i]
+            t_max = self.seq_T[i + 1]
+            t_segment = jnp.linspace(t_min, t_max, M_t_per_segment+1)[:-1]
+            t_grids.append(t_segment)
+
+        # Concatenate all segment time grids into a full time grid
+        t_grid_full = jnp.concatenate(t_grids)
+        # Create the spatial grid
+        x_grid = jnp.linspace(self.x_min, self.x_max, M_x)
+
+        # Create a meshgrid for t and x
+        t, x = jnp.meshgrid(t_grid_full, x_grid, indexing='ij')  # Shapes: (total_M_t, M_x)
+
+        # Flatten the grid for evaluation
+        tx_points_full = jnp.stack([t.ravel(), x.ravel()], axis=1)  # Shape: (total_M_t * M_x, 2)
+
+        # Determine which segment each time point belongs to
+        segment_indices = jnp.digitize(tx_points_full[:, 0], self.seq_T) - 1
+        segment_indices = jnp.clip(segment_indices, 0, self.num_segments - 1)
+
+        # Collect outputs from each segment
+        u_values_full = []
+        for i in range(self.num_segments):
+            mask = (segment_indices == i)
+            tx_points_segment = tx_points_full[mask]
+            if tx_points_segment.size > 0:
+                segment = self.segments[i]
+                u_values_segment = segment.model.forward(tx_points_segment)
+                u_values_full.append(u_values_segment)
+
+        # Combine all segment outputs into a single array
+        u_values_full = jnp.concatenate(u_values_full)
+        u_values_full = u_values_full.reshape(len(t_grid_full), M_x)
+
+        # Create the plot
+        t_range = self.total_t_max - self.total_t_min
+        fig = plt.figure(figsize=(10, 4 + 4 * t_range))
+        gs = gridspec.GridSpec(2, 1, height_ratios=[t_range, 1])
+        ax1 = fig.add_subplot(gs[0])
+        ax2 = fig.add_subplot(gs[1])
+
+        # 2D color mesh plot
+        pcm = ax1.pcolormesh(x_grid, t_grid_full, u_values_full, shading='nearest', cmap='viridis')
+        fig.colorbar(pcm, ax=ax1, label='$u_\\theta(t, x)$')
+        ax1.set_xlabel('x')
+        ax1.set_ylabel('t')
+        ax1.set_title(f'Combined Neural Network $u_\\theta$ over [{self.total_t_min}, {self.total_t_max}]')
+
+        # 1D plot at t = t_max
+        # Get the last segment
+        segment = self.segments[-1]
+        t_jnp = jnp.full_like(x_grid, self.total_t_max)
+        tx_points_max = jnp.stack([t_jnp, x_grid], axis=1)  # Shape: (M_x, 2)
+        u_at_max = segment.model.forward(tx_points_max)
+        ax2.plot(x_grid, u_at_max)
+        ax2.set_xlabel('x')
+        ax2.set_ylabel('$u_\\theta(t_{max}, x)$')
+        ax2.set_title(f'Neural Network Function at t = {self.total_t_max:.2f}')
+
+        # Adjust layout and display the main plot
+        plt.tight_layout()
+        # Upload the figure to wandb
+        if upload_fig:
+            wandb.log({f"u_theta_tmin{t_min:.1f}_tmax_{t_max:.1f}": wandb.Image(fig)})
+
         plt.show()
