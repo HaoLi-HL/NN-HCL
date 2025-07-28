@@ -184,8 +184,6 @@ class SeqMinMaxOptProb:
         # After training all segments, plot the combined output
         print("\nPlotting combined output across all segments from t=0 to total_t_max")
         self.plot_combined_u_theta(M_t_per_segment=self.M_t, M_x=self.M_x, upload_fig=True)
-        self.plot_solution_at_time(self.total_t_max, upload_fig=True)
-
         wandb.finish()
 
 
@@ -215,110 +213,6 @@ class SeqMinMaxOptProb:
             segment = self.segments[i]
             segment.load_model(model_path)
             print(f"Loaded segment {i} model from {model_path}")
-''' 
-    def plot_combined_u_theta(self, M_t_per_segment=1000, M_x=2000, upload_fig=False):
-        """
-        Plot the combined output of all trained segments over the full time domain [0, total_t_max].
-
-        Args:
-            M_t_per_segment (int): Number of grid points in t per segment.
-            M_x (int): Number of grid points in x.
-        """
-        # Generate time grids for each segment based on self.seq_T
-        t_grids = []
-        for i in range(self.num_segments):
-            t_min = self.seq_T[i]
-            t_max = self.seq_T[i + 1]
-            t_segment = jnp.linspace(t_min, t_max, M_t_per_segment+1)[:-1]
-            t_grids.append(t_segment)
-
-        # Concatenate all segment time grids into a full time grid
-        t_grid_full = jnp.concatenate(t_grids)
-        # Create the spatial grid
-        x_grid = jnp.linspace(self.x_min, self.x_max, M_x)
-
-        # Create a meshgrid for t and x
-        t, x = jnp.meshgrid(t_grid_full, x_grid, indexing='ij')  # Shapes: (total_M_t, M_x)
-
-        # Flatten the grid for evaluation
-        tx_points_full = jnp.stack([t.ravel(), x.ravel()], axis=1)  # Shape: (total_M_t * M_x, 2)
-
-        # Determine which segment each time point belongs to
-        segment_indices = jnp.digitize(tx_points_full[:, 0], self.seq_T) - 1
-        segment_indices = jnp.clip(segment_indices, 0, self.num_segments - 1)
-
-        # Collect outputs from each segment
-        u_values_full = []
-        for i in range(self.num_segments):
-            mask = (segment_indices == i)
-            tx_points_segment = tx_points_full[mask]
-            if tx_points_segment.size > 0:
-                segment = self.segments[i]
-                u_values_segment = segment.model.forward(tx_points_segment)
-                u_values_full.append(u_values_segment)
-
-        # Combine all segment outputs into a single array
-        u_values_full = jnp.concatenate(u_values_full)
-        u_values_full = u_values_full.reshape(len(t_grid_full), M_x)
-
-        # Create the plot
-        height = (self.total_t_max - self.total_t_min) * 8
-        width = (self.x_max - self.x_min) * 8 + 2
-        fig = plt.figure(figsize=(width, height))
-        plt.pcolormesh(x_grid, t_grid_full, u_values_full, shading='nearest', cmap='viridis')
-        plt.colorbar(label='$u_\\theta(t, x)$')
-        plt.xlabel('x')
-        plt.ylabel('t')
-        plt.title(f'Combined Neural Network $u_\\theta$ over [{self.total_t_min}, {self.total_t_max}]')
-        # Upload the figure to wandb
-        if upload_fig:
-            wandb.log({"combined_u_theta_plot": wandb.Image(fig)})
-        plt.show()
-        
-
-    def plot_solution_at_time(self, T, M_x=1000, upload_fig=False):
-        """
-        Plot the solution u_theta at a specific time T.
-
-        Args:
-            T (float): The time at which to plot the solution.
-            M_x (int): Number of grid points in the x-direction (default: 100).
-        """
-        # Find the segment that contains time T
-        segment_index = None
-        for i in range(len(self.seq_T) - 1):
-            if self.seq_T[i] <= T < self.seq_T[i + 1]:
-                segment_index = i
-                break
-        if segment_index is None:
-            if T == self.seq_T[-1]:  # Allow T to be exactly at the end
-                segment_index = len(self.seq_T) - 2
-            else:
-                raise ValueError(f"Time T={T} is outside the defined segments [{self.seq_T[0]}, {self.seq_T[-1]}]")
-
-        # Get the segment
-        segment = self.segments[segment_index]
-
-        # Generate spatial grid and input points
-        x_grid = jnp.linspace(self.x_min, self.x_max, M_x)
-        t_fixed = jnp.full_like(x_grid, T)  # Array of T repeated for each x
-        tx_points = jnp.stack([t_fixed, x_grid], axis=1)  # Shape: (M_x, 2)
-
-        # Evaluate the neural network at these points
-        u_values = segment.model.forward(tx_points)  # Shape: (M_x,)
-
-        # Plot the solution
-        fig = plt.figure(figsize=(8, 6))
-        plt.plot(x_grid, u_values, label=f'$u_\\theta$ at t={T}')
-        plt.xlabel('x')
-        plt.ylabel('$u_\\theta$')
-        plt.title(f'Solution at Time T={T}')
-        plt.legend()
-        # Upload the figure to wandb
-        if upload_fig:
-            wandb.log({"combined_u_theta_plot": wandb.Image(fig)})
-        plt.show()
-''' 
 
     def plot_combined_u_theta(self, M_t_per_segment=1000, M_x=2000, upload_fig=False):
         """
