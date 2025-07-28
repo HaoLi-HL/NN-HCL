@@ -154,7 +154,8 @@ class SeqMinMaxOptProb:
                 t_min=t_min,
                 t_max=t_max,
                 x_min=self.x_min,
-                x_max=self.x_max
+                x_max=self.x_max,
+                upload_fig=True
             )
 
             # Train the segment
@@ -171,7 +172,8 @@ class SeqMinMaxOptProb:
                 t_min=t_min,
                 t_max=t_max,
                 x_min=self.x_min,
-                x_max=self.x_max
+                x_max=self.x_max,
+                upload_fig=True
             )
 
             # Store the segment and update previous_params with the trained parameters
@@ -179,8 +181,8 @@ class SeqMinMaxOptProb:
 
         # After training all segments, plot the combined output
         print("\nPlotting combined output across all segments from t=0 to total_t_max")
-        self.plot_combined_u_theta(M_t_per_segment=self.M_t, M_x=self.M_x)
-        self.plot_solution_at_time(self.total_t_max)
+        self.plot_combined_u_theta(M_t_per_segment=self.M_t, M_x=self.M_x, upload_fig=True)
+        self.plot_solution_at_time(self.total_t_max, upload_fig=True)
 
         wandb.finish()
 
@@ -212,7 +214,7 @@ class SeqMinMaxOptProb:
             segment.load_model(model_path)
             print(f"Loaded segment {i} model from {model_path}")
     
-    def plot_combined_u_theta(self, M_t_per_segment=1000, M_x=2000):
+    def plot_combined_u_theta(self, M_t_per_segment=1000, M_x=2000, upload_fig=False):
         """
         Plot the combined output of all trained segments over the full time domain [0, total_t_max].
 
@@ -260,16 +262,19 @@ class SeqMinMaxOptProb:
         # Create the plot
         height = (self.total_t_max - self.total_t_min) * 8
         width = (self.x_max - self.x_min) * 8 + 2
-        plt.figure(figsize=(width, height))
+        fig = plt.figure(figsize=(width, height))
         plt.pcolormesh(x_grid, t_grid_full, u_values_full, shading='nearest', cmap='viridis')
         plt.colorbar(label='$u_\\theta(t, x)$')
         plt.xlabel('x')
         plt.ylabel('t')
         plt.title(f'Combined Neural Network $u_\\theta$ over [{self.total_t_min}, {self.total_t_max}]')
+        # Upload the figure to wandb
+        if upload_fig:
+            wandb.log({"combined_u_theta_plot": wandb.Image(fig)})
         plt.show()
         
 
-    def plot_solution_at_time(self, T, M_x=1000):
+    def plot_solution_at_time(self, T, M_x=1000, upload_fig=False):
         """
         Plot the solution u_theta at a specific time T.
 
@@ -301,10 +306,13 @@ class SeqMinMaxOptProb:
         u_values = segment.model.forward(tx_points)  # Shape: (M_x,)
 
         # Plot the solution
-        plt.figure(figsize=(8, 6))
+        fig = plt.figure(figsize=(8, 6))
         plt.plot(x_grid, u_values, label=f'$u_\\theta$ at t={T}')
         plt.xlabel('x')
         plt.ylabel('$u_\\theta$')
         plt.title(f'Solution at Time T={T}')
         plt.legend()
+        # Upload the figure to wandb
+        if upload_fig:
+            wandb.log({"combined_u_theta_plot": wandb.Image(fig)})
         plt.show()
