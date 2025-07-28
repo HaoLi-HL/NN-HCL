@@ -155,7 +155,7 @@ class SeqMinMaxOptProb:
                 t_max=t_max,
                 x_min=self.x_min,
                 x_max=self.x_max,
-                upload_fig=True
+                upload_fig=False
             )
 
             # Train the segment
