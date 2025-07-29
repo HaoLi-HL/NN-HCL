@@ -355,7 +355,7 @@ class MinMaxOptProb:
         opt_state = optimizer.init(params)
 
         def pre_loss(params):
-            u_pred = vmap(lambda tx: self.model.forward_with_params(params, tx, 0))(tx_pre).squeeze()
+            u_pred = vmap(lambda tx: self.model.forward_with_params(params, tx, grade_idx=0))(tx_pre).squeeze()
             return jnp.mean((u_pred - y_pre)**2)
 
         pre_loss_grad = jax.value_and_grad(pre_loss)
