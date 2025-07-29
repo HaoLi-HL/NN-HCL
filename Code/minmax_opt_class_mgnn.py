@@ -371,7 +371,9 @@ class MinMaxOptProb:
         self.model.mlps[0].params = params
 
     def train_process_stage1(self, save_model=True):
-        self.pre_train_to_ic(self.pre_epochs)
+        if self.pre_epochs>0:
+            self.pre_train_to_ic(self.pre_epochs)
+            print(f"The pre-train to fit initial finished.")
         
         print("\nStarting Train Stage with MGDL")
         start_time = time.perf_counter()
