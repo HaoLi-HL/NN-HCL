@@ -197,6 +197,7 @@ class MinMaxOptProb:
         loss_abs = jnp.abs(residual)@quad_weights
         return loss, loss_abs
     
+    @jit
     def compute_tv_loss(self, params):
         """Compute the Total Variation Diminishing (TVD) loss."""
         # Define time points for TV calculation
@@ -239,7 +240,9 @@ class MinMaxOptProb:
         carry, _ = jax.lax.scan(body, initial_carry, jnp.arange(self.N_t_pnts - 1))
         tvd_loss = carry[1]
         return tvd_loss
+    
 
+    @jit
     def loss_fn_elem_int(self, params):
         quad_points = self.pwp.quad_points
         quad_weights = self.pwp.quad_weights
