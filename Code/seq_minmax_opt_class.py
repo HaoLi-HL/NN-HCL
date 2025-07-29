@@ -18,7 +18,7 @@ class SeqMinMaxOptProb:
     def __init__(self, num_segments, total_t_min, total_t_max, x_min=0, x_max=1, seq_T=None, N_t=10, N_x=10, N_bc=2048, N_ic=4096, hidden_dims_list=[(64, 64, 64, 64)], seed=0, 
                  sigma=0.1, N_perturb=10000, k_h_rf_times=2, f_adaptive_weight=1000, f_opt_kh=1, u0=None, u1=None, u2=None, project="seq_minmax_burgers",
                  lambda_ic=10.0, lambda_bc=10.0, lambda_eqn=1.0, alpha=0.9, gamma=0.0, N_test_gamma=1000, adjust_gamma=True,
-                 L1reg=0, sampling_method='normal', notes='', lambda_tv=1.0, 
+                 L1reg=0, sampling_method='normal', notes='', lambda_tv=1.0, N_t_pnts=None, N_x_pnts=None,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  res=None, res_visc=None, use_loss_fn_elem_int=True, total_grade=1, k=0, use_a=True,
                  M_t=1000, M_x=2000, set_wandb=True):
@@ -67,6 +67,8 @@ class SeqMinMaxOptProb:
         self.sampling_method = sampling_method
         self.notes = notes
         self.lambda_tv = lambda_tv
+        self.N_t_pnts = N_t_pnts
+        self.N_x_pnts = N_x_pnts
         self.init_lrs = init_lrs
         self.grade_epochs = grade_epochs
         self.decay_rates = decay_rates
@@ -140,7 +142,8 @@ class SeqMinMaxOptProb:
                 N_bc=self.N_bc, N_ic=self.N_ic, hidden_dims_list=self.hidden_dims_list, seed=self.seed, 
                 sigma=self.sigma, N_perturb=self.N_perturb, k_h_rf_times=self.k_h_rf_times, u0=current_u0, u1=self.u1, u2=self.u2, project=self.project,
                 gamma=self.gamma, alpha=self.alpha, N_test_gamma=self.N_test_gamma, adjust_gamma=self.adjust_gamma,
-                L1reg=self.L1reg, sampling_method=self.sampling_method, notes=self.notes, lambda_tv=self.lambda_tv,
+                L1reg=self.L1reg, sampling_method=self.sampling_method, notes=self.notes, 
+                lambda_tv=self.lambda_tv, N_t_pnts=self.N_t_pnts, N_x_pnts=self.N_x_pnts,
                 init_lrs=self.init_lrs, grade_epochs=self.grade_epochs, decay_rates=self.decay_rates, 
                 init_lr_stage2=self.init_lr_stage2, epoch_stage2=self.epoch_stage2, decay_rate_stage2=self.decay_rate_stage2,
                 f_adaptive_weight=self.f_adaptive_weight, f_opt_kh=self.f_opt_kh, res=self.res, res_visc=self.res_visc, 
