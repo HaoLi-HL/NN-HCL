@@ -111,7 +111,10 @@ class SeqMinMaxOptProb:
                                "N_test_gamma": N_test_gamma,
                                "adjust_gamma": adjust_gamma,
                                "L1reg": L1reg,
-                               "sampling_method": sampling_method
+                               "sampling_method": sampling_method,
+                               "lambda_tv": lambda_tv,
+                               "N_t_pnts": N_t_pnts,
+                               "N_x_pnts": N_x_pnts
                               })
 
     def train_seq(self, save_model=True):
