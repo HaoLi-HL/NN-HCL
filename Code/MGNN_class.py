@@ -172,7 +172,7 @@ class MG_NN:
             temp = out_wo_layer
         return sum_grade
     
-    def forward_with_params(self, params, x, grade_idx=0):
+    def forward_with_params(self, params, x, grade_idx):
         fixed_params = [self.mlps[i].params for i in range(grade_idx)]
         params_list = fixed_params + [params]
         return self.forward_with_params_list(params_list, x)
