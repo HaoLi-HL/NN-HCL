@@ -12,7 +12,6 @@ import pickle
 import flax.linen as nn
 import optax
 import optax.tree_utils as otu
-from NN_class import MLP
 from MGNN_class import MLP, MG_NN
 from my_helpers import plot_u_theta, plot_kh
 from functools import partial
@@ -198,7 +197,6 @@ class MinMaxOptProb:
         loss_abs = jnp.abs(residual)@quad_weights
         return loss, loss_abs
     
-    @jit
     def compute_tv_loss(self, params):
         """Compute the Total Variation Diminishing (TVD) loss."""
         # Define time points for TV calculation
@@ -243,7 +241,6 @@ class MinMaxOptProb:
         return tvd_loss
     
 
-    @jit
     def loss_fn_elem_int(self, params):
         quad_points = self.pwp.quad_points
         quad_weights = self.pwp.quad_weights
