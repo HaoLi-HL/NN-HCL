@@ -1,0 +1,78 @@
+_wandb:
+    value:
+        cli_version: 0.20.1
+        m: []
+        python_version: 3.10.18
+        t:
+            "1":
+                - 12
+                - 45
+            "2":
+                - 12
+                - 45
+            "3":
+                - 2
+                - 13
+                - 16
+                - 55
+            "4": 3.10.18
+            "5": 0.20.1
+            "8":
+                - 1
+            "12": 0.20.1
+            "13": darwin-arm64
+L1reg:
+    value: 0
+N_bc:
+    value: 2048
+N_ic:
+    value: 4096
+N_perturb:
+    value: 10000
+N_t:
+    value: 32
+N_test_gamma:
+    value: 1000
+N_x:
+    value: 64
+adjust_gamma:
+    value: true
+alpha:
+    value: 0.9
+gamma:
+    value: 0
+hidden_dims_list:
+    value:
+        - - 50
+          - 50
+          - 50
+          - 50
+          - 50
+k_h_rf_times:
+    value: 2
+lambda_bc:
+    value: 10
+lambda_eqn:
+    value: 1
+lambda_ic:
+    value: 10
+num_segments:
+    value: 5
+sampling_method:
+    value: normal
+seed:
+    value: 0
+seq_T:
+    value:
+        - 0
+        - 0.2
+        - 0.4
+        - 0.6000000000000001
+        - 0.8
+        - 1
+sigma:
+    value: 0.1
+total_t_max:
+    value: 1
+total_t_min:
+    value: 0

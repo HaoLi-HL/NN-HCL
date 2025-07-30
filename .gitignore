@@ -16,3 +16,4 @@ data/
 *.pyc
 *.log
 
+Code/wandb/latest-run
