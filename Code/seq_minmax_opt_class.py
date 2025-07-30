@@ -9,6 +9,8 @@ from minmax_opt_class_mgnn import MinMaxOptProb
 from my_helpers import plot_u_theta, plot_loss_history
 import matplotlib.pyplot as plt
 import wandb
+import matplotlib.gridspec as gridspec
+
 
 
 
@@ -16,7 +18,7 @@ class SeqMinMaxOptProb:
     def __init__(self, num_segments, total_t_min, total_t_max, x_min=0, x_max=1, seq_T=None, N_t=10, N_x=10, N_bc=2048, N_ic=4096, hidden_dims_list=[(64, 64, 64, 64)], seed=0, 
                  sigma=0.1, N_perturb=10000, k_h_rf_times=2, f_adaptive_weight=1000, f_opt_kh=1, u0=None, u1=None, u2=None, project="seq_minmax_burgers",
                  lambda_ic=10.0, lambda_bc=10.0, lambda_eqn=1.0, alpha=0.9, gamma=0.0, N_test_gamma=1000, adjust_gamma=True,
-                 L1reg=0, sampling_method='normal', notes='', lambda_tv=1.0, 
+                 L1reg=0, sampling_method='normal', notes='', lambda_tv=1.0, N_t_pnts=None, N_x_pnts=None, pre_epochs=1000,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  res=None, res_visc=None, use_loss_fn_elem_int=True, total_grade=1, k=0, use_a=True,
                  M_t=1000, M_x=2000, set_wandb=True):
@@ -65,6 +67,9 @@ class SeqMinMaxOptProb:
         self.sampling_method = sampling_method
         self.notes = notes
         self.lambda_tv = lambda_tv
+        self.N_t_pnts = N_t_pnts
+        self.N_x_pnts = N_x_pnts
+        self.pre_epochs = pre_epochs
         self.init_lrs = init_lrs
         self.grade_epochs = grade_epochs
         self.decay_rates = decay_rates
@@ -81,7 +86,7 @@ class SeqMinMaxOptProb:
         self.use_a = use_a
         self.M_t = M_t
         self.M_x = M_x
-        self.run_name = f"tmin{total_t_min:.1f}_tmax{total_t_max:.1f}_N{num_segments}_Nt{N_t}_Nx{N_x}_lrs{init_lrs[0]}_eps{grade_epochs[0]}_L1reg{L1reg}_sig{sigma}_gam{gamma}_Np{N_perturb}_sd{seed}"
+        self.run_name = f"({total_t_max:.1f}-{total_t_min:.1f})/{num_segments}_Nt{N_t}_Nx{N_x}_lrs{init_lrs[0]}_eps{grade_epochs[0]}_L1reg{L1reg}_sig{sigma}_gam{gamma}_Np{N_perturb}_TV{lambda_tv}_sd{seed}"
         self.project = project
         if self.set_wandb:
             wandb.init(project=self.project, 
@@ -107,7 +112,10 @@ class SeqMinMaxOptProb:
                                "N_test_gamma": N_test_gamma,
                                "adjust_gamma": adjust_gamma,
                                "L1reg": L1reg,
-                               "sampling_method": sampling_method
+                               "sampling_method": sampling_method,
+                               "lambda_tv": lambda_tv,
+                               "N_t_pnts": N_t_pnts,
+                               "N_x_pnts": N_x_pnts
                               })
 
     def train_seq(self, save_model=True):
@@ -138,7 +146,8 @@ class SeqMinMaxOptProb:
                 N_bc=self.N_bc, N_ic=self.N_ic, hidden_dims_list=self.hidden_dims_list, seed=self.seed, 
                 sigma=self.sigma, N_perturb=self.N_perturb, k_h_rf_times=self.k_h_rf_times, u0=current_u0, u1=self.u1, u2=self.u2, project=self.project,
                 gamma=self.gamma, alpha=self.alpha, N_test_gamma=self.N_test_gamma, adjust_gamma=self.adjust_gamma,
-                L1reg=self.L1reg, sampling_method=self.sampling_method, notes=self.notes, lambda_tv=self.lambda_tv,
+                L1reg=self.L1reg, sampling_method=self.sampling_method, notes=self.notes, 
+                lambda_tv=self.lambda_tv, N_t_pnts=self.N_t_pnts, N_x_pnts=self.N_x_pnts, pre_epochs=self.pre_epochs,
                 init_lrs=self.init_lrs, grade_epochs=self.grade_epochs, decay_rates=self.decay_rates, 
                 init_lr_stage2=self.init_lr_stage2, epoch_stage2=self.epoch_stage2, decay_rate_stage2=self.decay_rate_stage2,
                 f_adaptive_weight=self.f_adaptive_weight, f_opt_kh=self.f_opt_kh, res=self.res, res_visc=self.res_visc, 
@@ -154,7 +163,8 @@ class SeqMinMaxOptProb:
                 t_min=t_min,
                 t_max=t_max,
                 x_min=self.x_min,
-                x_max=self.x_max
+                x_max=self.x_max,
+                upload_fig=False
             )
 
             # Train the segment
@@ -171,7 +181,8 @@ class SeqMinMaxOptProb:
                 t_min=t_min,
                 t_max=t_max,
                 x_min=self.x_min,
-                x_max=self.x_max
+                x_max=self.x_max,
+                upload_fig=True
             )
 
             # Store the segment and update previous_params with the trained parameters
@@ -179,9 +190,7 @@ class SeqMinMaxOptProb:
 
         # After training all segments, plot the combined output
         print("\nPlotting combined output across all segments from t=0 to total_t_max")
-        self.plot_combined_u_theta(M_t_per_segment=self.M_t, M_x=self.M_x)
-        self.plot_solution_at_time(self.total_t_max)
-
+        self.plot_combined_u_theta(M_t_per_segment=self.M_t, M_x=self.M_x, upload_fig=True)
         wandb.finish()
 
 
@@ -211,8 +220,8 @@ class SeqMinMaxOptProb:
             segment = self.segments[i]
             segment.load_model(model_path)
             print(f"Loaded segment {i} model from {model_path}")
-    
-    def plot_combined_u_theta(self, M_t_per_segment=1000, M_x=2000):
+
+    def plot_combined_u_theta(self, M_t_per_segment=1000, M_x=2000, upload_fig=False):
         """
         Plot the combined output of all trained segments over the full time domain [0, total_t_max].
 
@@ -258,53 +267,34 @@ class SeqMinMaxOptProb:
         u_values_full = u_values_full.reshape(len(t_grid_full), M_x)
 
         # Create the plot
-        height = (self.total_t_max - self.total_t_min) * 8
-        width = (self.x_max - self.x_min) * 8 + 2
-        plt.figure(figsize=(width, height))
-        plt.pcolormesh(x_grid, t_grid_full, u_values_full, shading='nearest', cmap='viridis')
-        plt.colorbar(label='$u_\\theta(t, x)$')
-        plt.xlabel('x')
-        plt.ylabel('t')
-        plt.title(f'Combined Neural Network $u_\\theta$ over [{self.total_t_min}, {self.total_t_max}]')
-        plt.show()
-        
+        t_range = self.total_t_max - self.total_t_min
+        fig = plt.figure(figsize=(10, 4 + 4 * t_range))
+        gs = gridspec.GridSpec(2, 1, height_ratios=[t_range, 1])
+        ax1 = fig.add_subplot(gs[0])
+        ax2 = fig.add_subplot(gs[1])
 
-    def plot_solution_at_time(self, T, M_x=1000):
-        """
-        Plot the solution u_theta at a specific time T.
+        # 2D color mesh plot
+        pcm = ax1.pcolormesh(x_grid, t_grid_full, u_values_full, shading='nearest', cmap='viridis')
+        fig.colorbar(pcm, ax=ax1, label='$u_\\theta(t, x)$')
+        ax1.set_xlabel('x')
+        ax1.set_ylabel('t')
+        ax1.set_title(f'Combined Neural Network $u_\\theta$ over [{self.total_t_min}, {self.total_t_max}]')
 
-        Args:
-            T (float): The time at which to plot the solution.
-            M_x (int): Number of grid points in the x-direction (default: 100).
-        """
-        # Find the segment that contains time T
-        segment_index = None
-        for i in range(len(self.seq_T) - 1):
-            if self.seq_T[i] <= T < self.seq_T[i + 1]:
-                segment_index = i
-                break
-        if segment_index is None:
-            if T == self.seq_T[-1]:  # Allow T to be exactly at the end
-                segment_index = len(self.seq_T) - 2
-            else:
-                raise ValueError(f"Time T={T} is outside the defined segments [{self.seq_T[0]}, {self.seq_T[-1]}]")
+        # 1D plot at t = t_max
+        # Get the last segment
+        segment = self.segments[-1]
+        t_jnp = jnp.full_like(x_grid, self.total_t_max)
+        tx_points_max = jnp.stack([t_jnp, x_grid], axis=1)  # Shape: (M_x, 2)
+        u_at_max = segment.model.forward(tx_points_max)
+        ax2.plot(x_grid, u_at_max)
+        ax2.set_xlabel('x')
+        ax2.set_ylabel('$u_\\theta(t_{max}, x)$')
+        ax2.set_title(f'Neural Network Function at t = {self.total_t_max:.2f}')
 
-        # Get the segment
-        segment = self.segments[segment_index]
+        # Adjust layout and display the main plot
+        plt.tight_layout()
+        # Upload the figure to wandb
+        if upload_fig:
+            wandb.log({f"u_theta_tmin{t_min:.1f}_tmax_{t_max:.1f}": wandb.Image(fig)})
 
-        # Generate spatial grid and input points
-        x_grid = jnp.linspace(self.x_min, self.x_max, M_x)
-        t_fixed = jnp.full_like(x_grid, T)  # Array of T repeated for each x
-        tx_points = jnp.stack([t_fixed, x_grid], axis=1)  # Shape: (M_x, 2)
-
-        # Evaluate the neural network at these points
-        u_values = segment.model.forward(tx_points)  # Shape: (M_x,)
-
-        # Plot the solution
-        plt.figure(figsize=(8, 6))
-        plt.plot(x_grid, u_values, label=f'$u_\\theta$ at t={T}')
-        plt.xlabel('x')
-        plt.ylabel('$u_\\theta$')
-        plt.title(f'Solution at Time T={T}')
-        plt.legend()
         plt.show()

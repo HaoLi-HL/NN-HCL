@@ -12,7 +12,6 @@ import pickle
 import flax.linen as nn
 import optax
 import optax.tree_utils as otu
-from NN_class import MLP
 from MGNN_class import MLP, MG_NN
 from my_helpers import plot_u_theta, plot_kh
 from functools import partial
@@ -29,7 +28,7 @@ class MinMaxOptProb:
     def __init__(self, t_min=0, t_max=1, x_min=0, x_max=1, N_t=10, N_x=10, N_bc=128, N_ic=256, hidden_dims_list=[(64, 64, 64, 64)], seed=0, 
                  sigma=0.1, N_perturb=10000, k_h_rf_times=2, f_adaptive_weight=1000, f_opt_kh=1, u0=None, u1=None, u2=None, project="minmax_mgnn_burgers",
                  lambda_ic=10.0, lambda_bc=10.0, lambda_eqn=1.0, gamma=0.0, alpha=0.9, N_test_gamma = 1000, adjust_gamma=True,
-                 L1reg=1, sampling_method='normal', notes='', lambda_tv=1.0, 
+                 L1reg=1, sampling_method='normal', notes='', lambda_tv=0.0, N_t_pnts=None, N_x_pnts=None, pre_epochs=1000,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  res=None, res_visc=None, use_loss_fn_elem_int=True, total_grade=1, k=0, use_a=True,
                  seq_train=False, set_wandb=True):
@@ -70,10 +69,11 @@ class MinMaxOptProb:
         self.res_visc = res_visc
         self.res = res
         self.lambda_tv = lambda_tv
-        self.N_t_pnts = 10*N_t  # Number of time points for TVD loss
-        self.N_x_pnts = 10*N_x  # Number of x points for TVD loss
+        self.N_t_pnts = 10*N_t if N_t_pnts is None else N_t_pnts
+        self.N_x_pnts = 10*N_x if N_x_pnts is None else N_x_pnts
         self.t_points = jnp.linspace(self.pwp.t_min, self.pwp.t_max, self.N_t_pnts)
         self.x_points = jnp.linspace(self.pwp.x_min, self.pwp.x_max, self.N_x_pnts)
+        self.pre_epochs = pre_epochs
         self.gen_ibc()
         if use_loss_fn_elem_int:
             self.loss_fn_eqn = self.loss_fn_elem_int
@@ -239,6 +239,7 @@ class MinMaxOptProb:
         carry, _ = jax.lax.scan(body, initial_carry, jnp.arange(self.N_t_pnts - 1))
         tvd_loss = carry[1]
         return tvd_loss
+    
 
     def loss_fn_elem_int(self, params):
         quad_points = self.pwp.quad_points
@@ -257,8 +258,11 @@ class MinMaxOptProb:
         interior_loss = jnp.dot(quad_weights, integrand)
 
         # Add TV penalty term
-        tv_loss = self.compute_tv_loss(params)
-        total_loss = interior_loss + self.lambda_tv * self.h * tv_loss
+        if self.lambda_tv > 0:
+            tv_loss = self.compute_tv_loss(params)
+            total_loss = interior_loss + self.lambda_tv * self.h * tv_loss
+        else:
+            total_loss = interior_loss
         return total_loss
     
     def loss_fn_elem_bdry(self, params, p_coeffs):
@@ -337,8 +341,40 @@ class MinMaxOptProb:
         updates, opt_state = optimizer.update(grads, opt_state)
         params = optax.apply_updates(params, updates)
         return all_losses[0], all_losses[1], params, opt_state
+    
+    def pre_train_to_ic(self, pre_epochs=1000, pre_lr=1e-3, N_pre=10000):
+        print("\nPre-training the network to fit v(t, x) = u0(x)")
+        # Generate pre-training points
+        self.key, subkey = jax.random.split(self.key)
+        tx_pre = jax.random.uniform(subkey, (N_pre, 2), minval=self.lb, maxval=self.ub)
+        y_pre = self.u0(tx_pre[:, 1])
+
+        # Collect all parameters
+        params = self.model.mlps[0].params
+        optimizer = optax.adam(pre_lr)
+        opt_state = optimizer.init(params)
+
+        def pre_loss(params):
+            u_pred = vmap(lambda tx: self.model.forward_with_params(params, tx, grade_idx=0))(tx_pre).squeeze()
+            return jnp.mean((u_pred - y_pre)**2)
+
+        pre_loss_grad = jax.value_and_grad(pre_loss)
+
+        for iter in range(pre_epochs):
+            loss, grads = pre_loss_grad(params)
+            updates, opt_state = optimizer.update(grads, opt_state)
+            params = optax.apply_updates(params, updates)
+            if iter % 100 == 0:
+                print(f"Pre-training Iter {iter}, Loss: {loss:.6f}")
+
+        # Assign back the pre-trained parameters
+        self.model.mlps[0].params = params
 
     def train_process_stage1(self, save_model=True):
+        if self.pre_epochs>0:
+            self.pre_train_to_ic(self.pre_epochs)
+            print(f"The pre-train to fit initial finished.")
+        
         print("\nStarting Train Stage with MGDL")
         start_time = time.perf_counter()
         self.global_step = 0

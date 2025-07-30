@@ -3,6 +3,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from flax import linen as nn
 from NN_class import MLP
+from jax import vmap
+import wandb
 
 
 def plot_loss_history(loss_int, loss_bc, title):
@@ -19,7 +21,7 @@ def plot_loss_history(loss_int, loss_bc, title):
 
 import matplotlib.gridspec as gridspec
 # Function to plot u_theta
-def plot_u_theta(model, params=None, M_t=1000, M_x=1000, t_min=0.0, t_max=1.0, x_min=0.0, x_max=1.0, ts=None):
+def plot_u_theta(model, params=None, M_t=1000, M_x=1000, t_min=0.0, t_max=1.0, x_min=0.0, x_max=1.0, ts=None, upload_fig=False):
     """
     Plot the neural network function u_theta over a specified domain [t_min, t_max] x [x_min, x_max],
     and include a 1D plot of u_theta at t = t_max. Additionally, plot separate 1D snapshots for each timestamp in ts if provided.
@@ -76,6 +78,9 @@ def plot_u_theta(model, params=None, M_t=1000, M_x=1000, t_min=0.0, t_max=1.0, x
 
     # Adjust layout and display the main plot
     plt.tight_layout()
+    # Upload the main figure to wandb
+    if upload_fig:
+        wandb.log({f"u_theta_tmin{t_min:.1f}_tmax_{t_max:.1f}": wandb.Image(fig)})
     plt.show()
 
     # Plot separate figures for each timestamp in ts
@@ -90,9 +95,6 @@ def plot_u_theta(model, params=None, M_t=1000, M_x=1000, t_min=0.0, t_max=1.0, x
         ax.set_title(f'Neural Network Function at t = {t_val:.2f} (closest t = {t_grid[idx]:.2f})')
         plt.tight_layout()
         plt.show()
-import matplotlib.pyplot as plt
-import jax.numpy as jnp
-from jax import vmap
 
 def plot_kh(pwp, M_factor=10):
     """
@@ -241,26 +243,35 @@ def plot_numerical_solution(file_path='data/burgers_sin_ref.npz', ts=None):
         plt.show()
 
 
-def compute_errors(model, file_path='data/burgers_sin_ref.npz', params=None, T=None):
+def compute_errors(model, u_ref=None, file_path='data/burgers_sin_ref.npz', params=None, T=None, x_min=-1.0, x_max=1.0, M_x=601):
     """
     Compute the relative error at time T and the space-time relative error between
-    the neural network approximation u* and the numerical solution u.
+    the neural network approximation u* and the reference solution u.
 
     Args:
-        model: u_theta.
+        model: Neural network u_theta.
+        u_ref: Reference function u_ref(t, x) where t is scalar and x is array (default: None).
         file_path: Path to the .npz file containing 'times', 'x', and 'u' (default: 'data/burgers_sin_ref.npz').
         params: Parameters (pytree) of the neural network (default: None).
-        T: The final time for the error at T. If None, uses the maximum time in the data (default: None).
+        T: The final time for the error at T. If None, uses the maximum time in the data or t_max (default: None).
+        x_min: Minimum x value (default: -1.0).
+        x_max: Maximum x value (default: 1.0).
+        M_x: Number of x grid points (default: 601).
 
     Returns:
         err_T: Relative error at time T.
         err_spacetime: Space-time relative error.
     """
-    # Load the numerical solution data
-    data = np.load(file_path)
-    times = data['times']
-    x = data['x']
-    u_num = data['u']  # Shape: (n_times, n_x)
+    # Load numerical solution data or use reference function
+    if u_ref is None:
+        data = np.load(file_path)
+        times = data['times']
+        x = data['x']
+        u_num = data['u']  # Shape: (n_times, n_x)
+    else:
+        times = np.linspace(0, T, M_x) if T is not None else np.linspace(0, 1.0, M_x)
+        x = np.linspace(x_min, x_max, M_x)
+        u_num = np.array([u_ref(t, x) for t in times])  # Shape: (n_times, n_x)
 
     if T is None:
         T = times[-1]
@@ -305,25 +316,35 @@ def compute_errors(model, file_path='data/burgers_sin_ref.npz', params=None, T=N
     return err_T, err_spacetime
 
 
-def compute_errors_combined_u_theta(seq_model, file_path='data/burgers_sin_ref.npz', T=None):
+def compute_errors_combined_u_theta(seq_model, u_ref=None, file_path='data/burgers_sin_ref.npz', T=None, x_min=-1.0, x_max=1.0, M_x=601):
     """
     Compute the relative error at time T and the space-time relative error between
-    the neural network approximation u* and the numerical solution u.
+    the neural network approximation u* and the reference solution u.
 
     Args:
         seq_model: Instance of SeqMinMaxOptProb representing the combined neural networks.
+        u_ref: Reference function u_ref(t, x) where t is scalar and x is array (default: None).
         file_path: Path to the .npz file containing 'times', 'x', and 'u' (default: 'data/burgers_sin_ref.npz').
-        T: The final time for the error at T. If None, uses the maximum time in the data (default: None).
+        T: The final time for the error at T. If None, uses the maximum time in the data or seq_model.total_t_max (default: None).
+        x_min: Minimum x value (default: -1.0).
+        x_max: Maximum x value (default: 1.0).
+        M_x: Number of x grid points (default: 601).
 
     Returns:
         err_T: Relative error at time T.
         err_spacetime: Space-time relative error.
     """
-    # Load the numerical solution data
-    data = np.load(file_path)
-    times = data['times']
-    x = data['x']
-    u_num = data['u']  # Shape: (n_times, n_x)
+    # Load numerical solution data or use reference function
+    if u_ref is None:
+        data = np.load(file_path)
+        times = data['times']
+        x = data['x']
+        u_num = data['u']  # Shape: (n_times, n_x)
+    else:
+        T = seq_model.total_t_max if T is None else T
+        times = np.linspace(seq_model.total_t_min, T, M_x)
+        x = np.linspace(x_min, x_max, M_x)
+        u_num = np.array([u_ref(t, x) for t in times])  # Shape: (n_times, n_x)
 
     if T is None:
         T = times[-1]
@@ -379,16 +400,21 @@ def compute_errors_combined_u_theta(seq_model, file_path='data/burgers_sin_ref.n
     return err_T, err_spacetime
 
 
-def plot_comparison_seperate(model, params=None, file_path='data/burgers_sin_ref.npz', ts=None):
+def plot_comparison_seperate(model, u_ref=None, file_path='data/burgers_sin_ref.npz', 
+                             params=None, ts=None, x_min=-1.0, x_max=1.0, M_x=601):
     """
-    Plot both the neural network solution and the numerical solution for each timestamp in ts,
+    Plot both the neural network solution and the reference solution for each timestamp in ts,
     with both solutions overlaid on the same axes in subplots (one subplot per timestamp).
 
     Args:
-        model: u_theta.
-        params: Parameters (pytree) of the neural network (default: None).
+        model: Neural network u_theta.
+        u_ref: Reference function u_ref(t, x) where t is scalar and x is array (default: None).
         file_path: Path to the .npz file containing 'times', 'x', and 'u' (default: 'data/burgers_sin_ref.npz').
+        params: Parameters (pytree) of the neural network (default: None).
         ts: List or array of timestamps for which to plot the solutions (default: None).
+        x_min: Minimum x value (default: -1.0).
+        x_max: Maximum x value (default: 1.0).
+        M_x: Number of x grid points (default: 601).
     """
     if ts is None:
         ts = []
@@ -396,20 +422,25 @@ def plot_comparison_seperate(model, params=None, file_path='data/burgers_sin_ref
         print("No timestamps provided. Nothing to plot.")
         return
 
-    # Load the numerical solution data
-    data = np.load(file_path)
-    times = data['times']
-    x = data['x']
-    u_num = data['u']  # Shape: (n_times, n_x)
+    # Load numerical solution data or use reference function
+    if u_ref is None:
+        data = np.load(file_path)
+        times = data['times']
+        x = data['x']
+        u_num = data['u']  # Shape: (n_times, n_x)
+    else:
+        x = np.linspace(x_min, x_max, M_x)
+        times = np.array(ts)
+        u_num = np.array([u_ref(t, x) for t in times])  # Shape: (len(ts), n_x)
 
     # Create subplots: one for each timestamp
     fig, axs = plt.subplots(len(ts), 1, figsize=(10, 4 * len(ts)), squeeze=False)
     axs = axs.flatten()  # Ensure axs is iterable even for len(ts)=1
 
     for i, t_val in enumerate(ts):
-        # Numerical solution: find closest time index
-        idx = np.argmin(np.abs(times - t_val))
-        u_num_t = u_num[idx, :]
+        # Reference solution: find closest time index or use exact t_val
+        idx = np.argmin(np.abs(times - t_val)) if u_ref is None else i
+        u_ref_t = u_num[idx, :]
 
         # Neural network solution: evaluate at exact t_val on the same x grid
         x_jnp = jnp.asarray(x)
@@ -424,29 +455,36 @@ def plot_comparison_seperate(model, params=None, file_path='data/burgers_sin_ref
 
         # Plot both on the same axes
         ax = axs[i]
-        ax.plot(x, u_num_t, label='Ref. solution', linewidth=2)
+        ax.plot(x, u_ref_t, label='Ref. solution', linewidth=2)
         ax.plot(x, u_nn_t, label='NN solution', linestyle='--', linewidth=2)
         ax.legend()
         ax.set_xlabel('x')
         ax.set_ylabel('u')
-        ax.set_title(f'Solutions at t = {t_val:.2f} (numerical closest t = {times[idx]:.2f})')
+        ax.set_title(f'Solutions at t = {t_val:.2f}' + (f' (numerical closest t = {times[idx]:.2f})' if u_ref is None else ''))
 
     plt.tight_layout()
     plt.show()
 
 
-def plot_comparison_together(model, params=None, file_path='data/burgers_sin_ref.npz', ts=None, save_path='data/sine_wave_plot_together.eps', title=None):
+def plot_comparison_together(model, u_ref=None, file_path='data/burgers_sin_ref.npz', 
+                             params=None, ts=None, save_path='data/sine_wave_plot_together.eps', title=None, x_min=-1.0, x_max=1.0, M_x=601):
     """
-    Plot both the neural network solution (solid line) and the numerical solution (dashed line)
+    Plot both the neural network solution (solid line) and the reference solution (dashed line)
     for each timestamp in ts, with all comparisons overlaid on the same single figure. For each
     time, the pair of lines (numerical and neural) share the same color, progressing from light
     to dark as time increases.
 
     Args:
-        model: u_theta.
+        model: Neural network u_theta.
+        u_ref: Reference function u_ref(t, x) where t is scalar and x is array (default: None).
+        file_path: Path to the .npz file containing 'times', 'x', and 'u' (default: 'data/burgers_sin_ref.npz').
         params: Parameters (pytree) of the neural network (default: None).
-        file_path: Path to the .npz file containing 'times', 'x', and 'u' (default: '/burgers_sin_ref.npz').
         ts: List or array of timestamps for which to plot the solutions (default: None).
+        save_path: Path to save the .eps file (default: 'data/sine_wave_plot_together.eps').
+        title: Title of the plot (default: None).
+        x_min: Minimum x value (default: -1.0).
+        x_max: Maximum x value (default: 1.0).
+        M_x: Number of x grid points (default: 601).
     """
     if ts is None:
         ts = []
@@ -454,11 +492,16 @@ def plot_comparison_together(model, params=None, file_path='data/burgers_sin_ref
         print("No timestamps provided. Nothing to plot.")
         return
 
-    # Load the numerical solution data
-    data = np.load(file_path)
-    times = data['times']
-    x = data['x']
-    u_num = data['u']  # Shape: (n_times, n_x)
+    # Load numerical solution data or use reference function
+    if u_ref is None:
+        data = np.load(file_path)
+        times = data['times']
+        x = data['x']
+        u_num = data['u']  # Shape: (n_times, n_x)
+    else:
+        x = np.linspace(x_min, x_max, M_x)
+        times = np.array(ts)
+        u_num = np.array([u_ref(t, x) for t in times])  # Shape: (len(ts), n_x)
 
     # Create a single figure and axes
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -473,15 +516,15 @@ def plot_comparison_together(model, params=None, file_path='data/burgers_sin_ref
     if min_t == max_t:
         norms = np.full(len(ts), 0.5)  # Medium color if all times are the same
     else:
-        norms = 0.6*(ts_array - min_t) / (max_t - min_t) + 0.4
+        norms = 0.6 * (ts_array - min_t) / (max_t - min_t) + 0.4
 
     for i, t_val in enumerate(ts):
         norm = norms[i]
         color = cmap(norm)
 
-        # Numerical solution: find closest time index
-        idx = np.argmin(np.abs(times - t_val))
-        u_num_t = u_num[idx, :]
+        # Reference solution: find closest time index or use exact t_val
+        idx = np.argmin(np.abs(times - t_val)) if u_ref is None else i
+        u_ref_t = u_num[idx, :]
 
         # Neural network solution: evaluate at exact t_val on the same x grid
         x_jnp = jnp.asarray(x)
@@ -495,7 +538,7 @@ def plot_comparison_together(model, params=None, file_path='data/burgers_sin_ref
         u_nn_t = np.asarray(u_nn_values).squeeze()  # Shape: (n_x,)
 
         # Plot both on the same axes with same color
-        ax.plot(x, u_num_t, linestyle='--', color=color, linewidth=3, label=f'Ref. solution t={t_val:.2f}')
+        ax.plot(x, u_ref_t, linestyle='--', color=color, linewidth=3, label=f'Ref. solution t={t_val:.2f}')
         ax.plot(x, u_nn_t, linestyle='-', color=color, linewidth=2, label=f'NN solution t={t_val:.2f}')
 
     ax.legend()
@@ -508,15 +551,19 @@ def plot_comparison_together(model, params=None, file_path='data/burgers_sin_ref
     plt.savefig(save_path, format='eps', bbox_inches='tight')
     plt.show()
 
-def plot_comparison_seperate_combined_u_theta(seq_model, file_path='data/burgers_sin_ref.npz', ts=None):
+def plot_comparison_seperate_combined_u_theta(seq_model, u_ref=None, file_path='data/burgers_sin_ref.npz', ts=None, x_min=-1.0, x_max=1.0, M_x=601):
     """
-    Plot both the neural network solution and the numerical solution for each timestamp in ts,
+    Plot both the neural network solution and the reference solution for each timestamp in ts,
     with both solutions overlaid on the same axes in subplots (one subplot per timestamp).
 
     Args:
         seq_model: Instance of SeqMinMaxOptProb representing the combined neural networks.
+        u_ref: Reference function u_ref(t, x) where t is scalar and x is array (default: None).
         file_path: Path to the .npz file containing 'times', 'x', and 'u' (default: 'data/burgers_sin_ref.npz').
         ts: List or array of timestamps for which to plot the solutions (default: None).
+        x_min: Minimum x value (default: -1.0).
+        x_max: Maximum x value (default: 1.0).
+        M_x: Number of x grid points (default: 601).
     """
     if ts is None:
         ts = []
@@ -524,20 +571,25 @@ def plot_comparison_seperate_combined_u_theta(seq_model, file_path='data/burgers
         print("No timestamps provided. Nothing to plot.")
         return
 
-    # Load the numerical solution data
-    data = np.load(file_path)
-    times = data['times']
-    x = data['x']
-    u_num = data['u']  # Shape: (n_times, n_x)
+    # Load numerical solution data or use reference function
+    if u_ref is None:
+        data = np.load(file_path)
+        times = data['times']
+        x = data['x']
+        u_num = data['u']  # Shape: (n_times, n_x)
+    else:
+        x = np.linspace(x_min, x_max, M_x)
+        times = np.array(ts)
+        u_num = np.array([u_ref(t, x) for t in times])  # Shape: (len(ts), n_x)
 
     # Create subplots: one for each timestamp
     fig, axs = plt.subplots(len(ts), 1, figsize=(10, 4 * len(ts)), squeeze=False)
     axs = axs.flatten()  # Ensure axs is iterable even for len(ts)=1
 
     for i, t_val in enumerate(ts):
-        # Numerical solution: find closest time index
-        idx = np.argmin(np.abs(times - t_val))
-        u_num_t = u_num[idx, :]
+        # Reference solution: find closest time index or use exact t_val
+        idx = np.argmin(np.abs(times - t_val)) if u_ref is None else i
+        u_ref_t = u_num[idx, :]
 
         # Find the segment that contains time t_val
         segment_index = None
@@ -564,15 +616,13 @@ def plot_comparison_seperate_combined_u_theta(seq_model, file_path='data/burgers
 
         # Plot both on the same axes
         ax = axs[i]
-        ax.plot(x, u_num_t, label='Ref. solution', linewidth=2)
+        ax.plot(x, u_ref_t, label='Ref. solution', linewidth=2)
         ax.plot(x, u_nn_t, label='NN solution', linestyle='--', linewidth=2)
         ax.legend()
         ax.set_xlabel('x')
         ax.set_ylabel('u')
-        ax.set_title(f'Solutions at t = {t_val:.2f} (numerical closest t = {times[idx]:.2f})')
+        ax.set_title(f'Solutions at t = {t_val:.2f}' + (f' (numerical closest t = {times[idx]:.2f})' if u_ref is None else ''))
 
     plt.tight_layout()
     plt.show()
-
-
 
