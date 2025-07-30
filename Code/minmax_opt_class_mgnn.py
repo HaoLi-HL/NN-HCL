@@ -258,8 +258,11 @@ class MinMaxOptProb:
         interior_loss = jnp.dot(quad_weights, integrand)
 
         # Add TV penalty term
-        tv_loss = self.compute_tv_loss(params)
-        total_loss = interior_loss + self.lambda_tv * self.h * tv_loss
+        if self.lambda_tv is not None:
+            tv_loss = self.compute_tv_loss(params)
+            total_loss = interior_loss + self.lambda_tv * self.h * tv_loss
+        else:
+            total_loss = interior_loss
         return total_loss
     
     def loss_fn_elem_bdry(self, params, p_coeffs):
