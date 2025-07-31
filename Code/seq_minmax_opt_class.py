@@ -119,14 +119,17 @@ class SeqMinMaxOptProb:
                                "N_x_pnts": N_x_pnts
                               })
 
-    def train_seq(self, save_model=True):
+    def train_seq(self, grade_epochs=None, epoch_stage2=None, save_model=True):
         """
         Train all segments sequentially, copying the previous segment's parameters to the next.
 
         Args:
             save_model (bool): Whether to save model parameters.
         """
-
+        if grade_epochs is None:
+            grade_epochs = self.grade_epochs
+        if epoch_stage2 is None:
+            epoch_stage2 = self.epoch_stage2
         for i in range(self.num_segments):
             # Define time interval for the current segment
             t_min = self.seq_T[i]
@@ -149,11 +152,11 @@ class SeqMinMaxOptProb:
                 gamma=self.gamma, alpha=self.alpha, N_test_gamma=self.N_test_gamma, adjust_gamma=self.adjust_gamma,
                 L1reg=self.L1reg, sampling_method=self.sampling_method, notes=self.notes, 
                 lambda_tv=self.lambda_tv, N_t_pnts=self.N_t_pnts, N_x_pnts=self.N_x_pnts, pre_epochs=self.pre_epochs,
-                init_lrs=self.init_lrs, grade_epochs=self.grade_epochs, decay_rates=self.decay_rates, 
-                init_lr_stage2=self.init_lr_stage2, epoch_stage2=self.epoch_stage2, decay_rate_stage2=self.decay_rate_stage2,
+                init_lrs=self.init_lrs, grade_epochs=grade_epochs, decay_rates=self.decay_rates, 
+                init_lr_stage2=self.init_lr_stage2, epoch_stage2=epoch_stage2, decay_rate_stage2=self.decay_rate_stage2,
                 f_adaptive_weight=self.f_adaptive_weight, f_opt_kh=self.f_opt_kh, res=self.res, res_visc=self.res_visc, 
                 use_loss_fn_elem_int=self.use_loss_fn_elem_int, total_grade=self.total_grade, k=self.k, use_a=self.use_a, seq_train=True, set_wandb=self.set_wandb,
-                f_plot=self.f_plot,
+                f_plot=self.f_plot, M_t=self.M_t, M_x=self.M_x,
             )
 
             # Plot before training

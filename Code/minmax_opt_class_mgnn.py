@@ -376,7 +376,7 @@ class MinMaxOptProb:
         # Assign back the pre-trained parameters
         self.model.mlps[0].params = params
 
-    def train_process_stage1(self, save_model=True):
+    def train_process_stage1(self, grade_epochs=None, save_model=True):
         if self.pre_epochs>0:
             self.pre_train_to_ic(self.pre_epochs)
             print(f"The pre-train to fit initial finished.")
@@ -392,6 +392,8 @@ class MinMaxOptProb:
             )
         
         print("\nStarting Train Stage with MGDL")
+        if grade_epochs is None:
+            grade_epochs = self.grade_epochs
         start_time = time.perf_counter()
         self.global_step = 0
         # Stage 1: Sequential Grade Training
@@ -412,8 +414,8 @@ class MinMaxOptProb:
             if self.gamma > 0.0 and self.adjust_gamma:
                 self.gamma = self.determine_equation_weight(grade_idx, gamma_init=self.gamma)
                 print(f"Stage 1, Gamma: {self.gamma:.6f}")
-            monitor_start = int(0.9 * self.grade_epochs[grade_idx])
-            for iter in range(self.grade_epochs[grade_idx]):
+            monitor_start = int(0.9 * grade_epochs[grade_idx])
+            for iter in range(grade_epochs[grade_idx]):
                 if (iter % self.f_adaptive_weight == 0) and (self.gamma == 0.0):
                     self.update_adaptive_weights(params)
                     print(f"Grade {grade_idx}, Iter {iter}, lambda_ic: {self.lambda_ic:.6f}, lambda_bc: {self.lambda_bc:.6f}, lambda_eqn: {self.lambda_eqn:.6f}")
@@ -453,11 +455,11 @@ class MinMaxOptProb:
             if self.best_params_list[grade_idx] is not None:
                 self.model.mlps[grade_idx].params = self.best_params_list[grade_idx]
             self.opt_state_list[grade_idx] = opt_state
-            self.global_step += self.grade_epochs[grade_idx]
+            self.global_step += grade_epochs[grade_idx]
         end_time = time.perf_counter()
         train_total_time = end_time - start_time
         print(f"Train time for stage1: {train_total_time:.6f} seconds")
-        print(f"Train average time per iteration: {train_total_time / sum(self.grade_epochs):.9e} seconds")
+        print(f"Train average time per iteration: {train_total_time / sum(grade_epochs):.9e} seconds")
 
     def train_process_stage2(self, save_model=True):
         # Stage 2: Refinement of Last k Grades

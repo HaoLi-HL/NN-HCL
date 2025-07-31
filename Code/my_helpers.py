@@ -21,7 +21,7 @@ def plot_loss_history(loss_int, loss_bc, title):
 
 import matplotlib.gridspec as gridspec
 # Function to plot u_theta
-def plot_u_theta(model, params=None, M_t=1000, M_x=1000, t_min=0.0, t_max=1.0, x_min=0.0, x_max=1.0, ts=None, upload_fig=False):
+def plot_u_theta(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=1.0, x_min=0.0, x_max=1.0, ts=None, upload_fig=False):
     """
     Plot the neural network function u_theta over a specified domain [t_min, t_max] x [x_min, x_max],
     and include a 1D plot of u_theta at t = t_max. Additionally, plot separate 1D snapshots for each timestamp in ts if provided.
