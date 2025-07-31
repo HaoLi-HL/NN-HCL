@@ -30,7 +30,7 @@ class MinMaxOptProb:
                  lambda_ic=10.0, lambda_bc=10.0, lambda_eqn=1.0, gamma=0.0, alpha=0.9, N_test_gamma = 1000, adjust_gamma=True,
                  L1reg=1, sampling_method='normal', notes='', lambda_tv=0.0, N_t_pnts=None, N_x_pnts=None, pre_epochs=1000,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
-                 res=None, res_visc=None, use_loss_fn_elem_int=True, total_grade=1, k=0, use_a=True,
+                 res=None, res_visc=None, use_loss_fn_elem_int=True, total_grade=1, k=0, use_a=True, M_t = 1000, M_x = 1000,
                  seq_train=False, set_wandb=True):
         self.seq_train = seq_train  # Sequential training flag
         self.set_wandb = set_wandb
@@ -40,6 +40,10 @@ class MinMaxOptProb:
 
         self.t_min = t_min
         self.t_max = t_max
+        self.x_min = x_min
+        self.x_max = x_max
+        self.M_t = M_t
+        self.M_x = M_x
         self.pwp = PiecewiseLinearPolynomials(N_t, N_x, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, times=k_h_rf_times)
         self.lb = jnp.array([t_min, x_min])
         self.ub = jnp.array([t_max, x_max])
@@ -374,6 +378,16 @@ class MinMaxOptProb:
         if self.pre_epochs>0:
             self.pre_train_to_ic(self.pre_epochs)
             print(f"The pre-train to fit initial finished.")
+            plot_u_theta(
+                model=self.model,
+                M_t=self.M_t,
+                M_x=self.M_x,
+                t_min=self.t_min,
+                t_max=self.t_max,
+                x_min=self.x_min,
+                x_max=self.x_max,
+                upload_fig=False
+            )
         
         print("\nStarting Train Stage with MGDL")
         start_time = time.perf_counter()
