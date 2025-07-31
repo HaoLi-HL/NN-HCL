@@ -30,7 +30,7 @@ class MinMaxOptProb:
                  lambda_ic=10.0, lambda_bc=10.0, lambda_eqn=1.0, gamma=0.0, alpha=0.9, N_test_gamma = 1000, adjust_gamma=True,
                  L1reg=1, sampling_method='normal', notes='', lambda_tv=0.0, N_t_pnts=None, N_x_pnts=None, pre_epochs=1000,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
-                 res=None, res_visc=None, use_loss_fn_elem_int=True, total_grade=1, k=0, use_a=True, M_t = 1000, M_x = 1000,
+                 res=None, res_visc=None, use_loss_fn_elem_int=True, total_grade=1, k=0, use_a=True, M_t = 1000, M_x = 1000, f_plot=1000,
                  seq_train=False, set_wandb=True):
         self.seq_train = seq_train  # Sequential training flag
         self.set_wandb = set_wandb
@@ -118,6 +118,8 @@ class MinMaxOptProb:
         lr_stage2 = optax.exponential_decay(init_value=init_lr_stage2, transition_steps=epoch_stage2, decay_rate=decay_rate_stage2, end_value=1e-6)
         self.optimizer_stage2 = optax.adam(lr_stage2)
         self.opt_state_stage2 = None  # To be initialized later
+
+        self.f_plot = f_plot
 
         if not self.seq_train and self.set_wandb:
             wandb.init(project=self.project, name=self.run_name, notes=self.notes,
@@ -386,7 +388,7 @@ class MinMaxOptProb:
                 t_max=self.t_max,
                 x_min=self.x_min,
                 x_max=self.x_max,
-                upload_fig=False
+                upload_fig=True
             )
         
         print("\nStarting Train Stage with MGDL")
@@ -433,6 +435,17 @@ class MinMaxOptProb:
                         wandb.log({f"tmin{self.t_min:.1f}_tmax{self.t_max:.1f}_loss_eqn_grade{grade_idx}": loss_eqn, 
                                    f"tmin{self.t_min:.1f}_tmax{self.t_max:.1f}_loss_ibc_grade{grade_idx}": loss_ibc, 
                                    f"step": self.global_step + iter})
+                if iter % self.f_plot == 0:
+                    plot_u_theta(
+                        model=self.model,
+                        M_t=self.M_t,
+                        M_x=self.M_x,
+                        t_min=self.t_min,
+                        t_max=self.t_max,
+                        x_min=self.x_min,
+                        x_max=self.x_max,
+                        upload_fig=True
+                        )
                 self.model.mlps[grade_idx].params = params
                 self.opt_state_list[grade_idx] = opt_state
 
