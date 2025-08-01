@@ -441,7 +441,7 @@ class MinMaxOptProb:
                     print(f"Grade {grade_idx}, Iter {iter}, lambda_ic: {self.lambda_ic:.6f}, lambda_bc: {self.lambda_bc:.6f}, lambda_eqn: {self.lambda_eqn:.6f}")
                 loss_eqn, loss_ibc, params, opt_state = self.train_step(params, optimizer, opt_state)
                 if iter % self.f_opt_kh == 0:
-                    self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs = self.maximize_kh(params, self.key)
+                    self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs, loss_each_elem = self.maximize_kh(params, self.key)
                 loss, (loss_eqn, loss_ibc) = self.loss_fn(params)
 
                 self.loss_eqn_history[grade_idx].append(loss_eqn)
@@ -507,7 +507,7 @@ class MinMaxOptProb:
             self.opt_state_stage2 = self.optimizer_stage2.init(params_last_k)
             optimizer = self.optimizer_stage2
             opt_state = self.opt_state_stage2
-            self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs = self.maximize_kh(params_last_k, self.key)
+            self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs, loss_each_elem = self.maximize_kh(params_last_k, self.key)
             monitor_start = int(0.9 * self.epoch_stage2)
             best_loss_eqn = float('inf')
             best_params_last_k = None
@@ -517,7 +517,7 @@ class MinMaxOptProb:
                     print(f"Stage 2, Iter {iter}, lambda_ic: {self.lambda_ic:.6f}, lambda_bc: {self.lambda_bc:.6f}, lambda_eqn: {self.lambda_eqn:.6f}")
                 loss_eqn, loss_ibc, params_last_k, opt_state = self.train_step(params_last_k, optimizer, opt_state)
                 if iter % self.f_opt_kh == 0:
-                    self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs = self.maximize_kh(params_last_k, self.key)
+                    self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs, loss_each_elem = self.maximize_kh(params_last_k, self.key)
                 loss_eqn = loss_eqn_fn(params_last_k)
                 loss_ibc = loss_data_fn(params_last_k)
                 if iter >= monitor_start:
@@ -599,13 +599,13 @@ class MinMaxOptProb:
             # Collect loss history
             loss_history_data = []
             loss_history_eqn = []
-            self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs = self.maximize_kh(current_params, self.key)
+            self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs, loss_each_elem = self.maximize_kh(current_params, self.key)
             for iter in range(self.N_test_gamma):
                 (loss, (loss_eqn, loss_data)), grads = jax.value_and_grad(total_loss, has_aux=True)(current_params)
                 updates, current_opt_state = optimizer.update(grads, current_opt_state)
                 current_params = optax.apply_updates(current_params, updates)
                 if iter % self.f_opt_kh == 0:
-                    self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs = self.maximize_kh(current_params, self.key)
+                    self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs, loss_each_elem = self.maximize_kh(current_params, self.key)
                 # Store losses
                 loss_eqn = loss_eqn_fn(current_params)
                 loss_data = loss_data_fn(current_params)
@@ -683,7 +683,7 @@ class MinMaxOptProb:
         print(f"Model loaded from {model_path} with hidden_dims_list: {loaded_hidden_dims_list}, loaded_total_grade = {loaded_data['total_grade']}.")
         self.opt_state_list = [opt.init(mlp.params) for opt, mlp in zip(self.optimizer_list, self.model.mlps)]
         self.gen_funcs(loaded_total_grade-1)
-        self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs = self.maximize_kh_step(loaded_params[-1], self.key)
+        self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs, loss_each_elem = self.maximize_kh_step(loaded_params[-1], self.key)
         loss_eqn = self.loss_fn_eqn(loaded_params[-1])
         loss_ibc = self.loss_fn_ibc(loaded_params[-1])
         print(f"For the loaded model, loss_eqn: {loss_eqn:.6f}, Loss_bc: {loss_ibc:.6f}")
