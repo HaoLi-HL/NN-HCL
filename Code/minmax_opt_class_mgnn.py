@@ -26,9 +26,9 @@ def pytree_l2_norm(pytree):
 # Optimizer Class
 class MinMaxOptProb:
     def __init__(self, t_min=0, t_max=1, x_min=0, x_max=1, N_t=10, N_x=10, N_bc=128, N_ic=256, hidden_dims_list=[(64, 64, 64, 64)], seed=0, 
-                 sigma=0.1, N_perturb=10000, k_h_rf_times=2, f_adaptive_weight=1000, f_opt_kh=1, u0=None, u1=None, u2=None, project="minmax_mgnn_burgers",
+                 sigma=1, N_perturb=10000, k_h_rf_times=2, f_adaptive_weight=1000, f_opt_kh=1, u0=None, u1=None, u2=None, project="minmax_mgnn_burgers",
                  lambda_ic=10.0, lambda_bc=10.0, lambda_eqn=1.0, gamma=0.0, alpha=0.9, N_test_gamma = 1000, adjust_gamma=True,
-                 L1reg=1, sampling_method='normal', notes='', lambda_tv=0.0, N_t_pnts=None, N_x_pnts=None, pre_epochs=1000,
+                 L1reg=1, sampling_method='uniform', notes='', lambda_tv=0.0, N_t_pnts=None, N_x_pnts=None, pre_epochs=1000,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  res=None, res_visc=None, use_loss_fn_elem_int=True, total_grade=1, k=0, use_a=True, M_t = 1000, M_x = 1000, f_plot=1000,
                  seq_train=False, set_wandb=True):
@@ -89,6 +89,8 @@ class MinMaxOptProb:
             self.loss_fn = self.loss_fn_lambda
         
         self.L1reg = L1reg
+        # For 'normal' sampling method, we use a normal distribution to generate perturbations.
+        # For 'uniform' sampling method, we use a uniform distribution to generate perturbations, which has bounded W^{1,inf} norm.
         self.sampling_method = sampling_method
         self.project = project
         self.notes = notes
@@ -161,16 +163,20 @@ class MinMaxOptProb:
         self.grad_u = jit(vmap(grad(net_u, argnums=1), in_axes = (None, 0)))
         self.hessian_u = jit(vmap(hessian(net_u, argnums=1), in_axes = (None, 0)))
 
-    def maximize_kh_vec(self, params, current_key):
+    def maximize_kh_step(self, params, current_key):
         Nt = self.pwp.N_elements
         vertices_all = self.pwp.triangles
         u_values_all = self.u_eval(params, vertices_all.reshape(-1, 2)).reshape(Nt, 3)
-        A_all = jnp.stack([jnp.ones((Nt, 3)), vertices_all[:, :, 0], vertices_all[:, :, 1]], axis=-1)
-        init_coeffs_all = jnp.linalg.solve(A_all, u_values_all[..., None]).squeeze(-1)
+
+        # find proper kh by generating samples for each triangle
         key, current_key = jax.random.split(current_key)
         if self.sampling_method == 'normal':
+            A_all = jnp.stack([jnp.ones((Nt, 3)), vertices_all[:, :, 0], vertices_all[:, :, 1]], axis=-1)
+            init_coeffs_all = jnp.linalg.solve(A_all, u_values_all[..., None]).squeeze(-1)
             perturbations_all = self.sigma * jax.random.normal(key, (self.N_perturb, 3))
         elif self.sampling_method == 'uniform':
+            avg_vals = jnp.average(u_values_all, axis=1)
+            init_coeffs_all = jnp.hstack([avg_vals[..., None] , jnp.zeros((Nt, 2))])
             perturbations_all = self.sigma * jax.random.uniform(key, (self.N_perturb, 3), minval=-1, maxval=1)
         
         perturbed_coeffs_all = init_coeffs_all[:, None, :] + perturbations_all[None, :, :]
@@ -388,7 +394,7 @@ class MinMaxOptProb:
                 t_max=self.t_max,
                 x_min=self.x_min,
                 x_max=self.x_max,
-                upload_fig=True
+                upload_fig=self.set_wandb
             )
         
         print("\nStarting Train Stage with MGDL")
@@ -406,7 +412,7 @@ class MinMaxOptProb:
         for grade_idx in range(self.total_grade):
             print(f"\nTraining Grade {grade_idx}")
             self.gen_funcs(grade_idx)
-            self.maximize_kh = jit(self.maximize_kh_vec)
+            self.maximize_kh = jit(self.maximize_kh_step)
             params = self.model.mlps[grade_idx].params
             optimizer = self.optimizer_list[grade_idx]
             opt_state = self.opt_state_list[grade_idx]
@@ -459,7 +465,6 @@ class MinMaxOptProb:
         end_time = time.perf_counter()
         train_total_time = end_time - start_time
         print(f"Train time for stage1: {train_total_time:.6f} seconds")
-        print(f"Train average time per iteration: {train_total_time / sum(grade_epochs):.9e} seconds")
 
     def train_process_stage2(self, save_model=True):
         # Stage 2: Refinement of Last k Grades
@@ -469,7 +474,7 @@ class MinMaxOptProb:
                 self.gamma = self.determine_equation_weight(gamma_init=self.gamma)
             print(f"\nStage 2: Refining Last {self.k} Grades")
             self.gen_funcs()
-            self.maximize_kh = jit(self.maximize_kh_vec)
+            self.maximize_kh = jit(self.maximize_kh_step)
             loss_eqn_fn = jit(self.loss_fn_eqn)
             loss_data_fn = jit(self.loss_fn_ibc)
             params_last_k = [mlp.params for mlp in self.model.mlps[-self.k:]]
@@ -653,7 +658,7 @@ class MinMaxOptProb:
         print(f"Model loaded from {model_path} with hidden_dims_list: {loaded_hidden_dims_list}, loaded_total_grade = {loaded_data['total_grade']}.")
         self.opt_state_list = [opt.init(mlp.params) for opt, mlp in zip(self.optimizer_list, self.model.mlps)]
         self.gen_funcs(loaded_total_grade-1)
-        self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs = self.maximize_kh_vec(loaded_params[-1], self.key)
+        self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs = self.maximize_kh_step(loaded_params[-1], self.key)
         loss_eqn = self.loss_fn_eqn(loaded_params[-1])
         loss_ibc = self.loss_fn_ibc(loaded_params[-1])
         print(f"For the loaded model, loss_eqn: {loss_eqn:.6f}, Loss_bc: {loss_ibc:.6f}")

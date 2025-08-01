@@ -156,6 +156,7 @@ def plot_kh(pwp, M_factor=10):
     # Evaluate k_h at all points using their corresponding element indices
     kh_values = pwp.evaluate(tx_points, element_indices)  # Shape: (M_t * M_x,)
     kh_values = kh_values.reshape(M_t, M_x)  # Reshape to (M_t, M_x)
+    kh_values = np.asarray(kh_values)
 
     # Plot using pcolormesh
     height = int((t_max - t_min)*4)
