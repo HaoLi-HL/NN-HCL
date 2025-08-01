@@ -92,6 +92,7 @@ class MinMaxOptProb:
         # For 'normal' sampling method, we use a normal distribution to generate perturbations.
         # For 'uniform' sampling method, we use a uniform distribution to generate perturbations, which has bounded W^{1,inf} norm.
         self.sampling_method = sampling_method
+        print(f"Using sampling method: {self.sampling_method}")
         self.project = project
         self.notes = notes
         self.run_name = f"tmin{t_min:.1f}_tmax{t_max:.1f}_Nt{N_t}_Nx{N_x}_lrs{init_lrs[0]}_eps{grade_epochs[0]}_L1reg{L1reg}_sig{sigma}_gam{gamma}_Np{N_perturb}_sd{seed}"
@@ -514,7 +515,6 @@ class MinMaxOptProb:
             end_time = time.perf_counter()
             train_total_time = end_time - start_time
             print(f"Train time for stage2: {train_total_time:.6f} seconds")
-            print(f"Train average time per iteration: {train_total_time / self.epoch_stage2:.9e} seconds")
         
         if save_model:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

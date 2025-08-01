@@ -627,3 +627,95 @@ def plot_comparison_seperate_combined_u_theta(seq_model, u_ref=None, file_path='
     plt.tight_layout()
     plt.show()
 
+def plot_u_theta_mesh(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=0.5, x_min=-1.0, x_max=1.0, ts=None, upload_fig=False, pwp=None, avg_vals=None):
+    """
+    Plot the neural network function u_theta over a specified domain [t_min, t_max] x [x_min, x_max],
+    and include a 1D plot of u_theta at t = t_max. Additionally, plot separate 1D snapshots for each timestamp in ts if provided.
+    Optionally overlay the triangular mesh from PiecewiseLinearPolynomials and denote avg_vals on the triangles.
+
+    Args:
+        model: Neural network u_theta.
+        params: Parameters (pytree) of the neural network.
+        M_t: Number of grid points in the t-direction (default: 1000).
+        M_x: Number of grid points in the x-direction (default: 2000).
+        t_min: Minimum value for t (default: 0.0).
+        t_max: Maximum value for t (default: 1.0).
+        x_min: Minimum value for x (default: 0.0).
+        x_max: Maximum value for x (default: 1.0).
+        ts: List or array of timestamps for which to plot individual 1D snapshots (default: None).
+        upload_fig: Whether to upload the figure to wandb (default: False).
+        pwp: Instance of PiecewiseLinearPolynomials to plot the mesh (default: None).
+        avg_vals: Average values to denote on each triangle (default: None).
+    """
+    if ts is None:
+        ts = []
+
+    # Create a grid for t and x over the specified ranges
+    t_grid = np.linspace(t_min, t_max, M_t)
+    x_grid = np.linspace(x_min, x_max, M_x)
+    t, x = np.meshgrid(t_grid, x_grid, indexing='ij')  # Shapes: (M_t, M_x)
+
+    # Flatten the grid for batch evaluation
+    tx_points = np.stack([t.ravel(), x.ravel()], axis=1)  # Shape: (M_t * M_x, 2)
+
+    # Evaluate u_theta on the grid points
+    if params is None:
+        u_values = model.forward(tx_points)
+    else:
+        u_values = model.forward_with_params(params, tx_points) if hasattr(model, 'forward_with_params') else model(params, tx_points)
+    u_values = u_values.reshape(M_t, M_x)  # Reshape to (M_t, M_x)
+
+    # Create larger figure with two subplots for the main plot
+    t_range = t_max - t_min
+    fig = plt.figure(figsize=(20, 8 + 8 * t_range))
+    gs = gridspec.GridSpec(2, 1, height_ratios=[t_range, 1])
+    ax1 = fig.add_subplot(gs[0])
+    ax2 = fig.add_subplot(gs[1])
+
+    # 2D color mesh plot
+    pcm = ax1.pcolormesh(x_grid, t_grid, u_values, shading='nearest', cmap='viridis')
+    fig.colorbar(pcm, ax=ax1, label='$u_\\theta(t, x)$')
+    ax1.set_xlabel('x')
+    ax1.set_ylabel('t')
+    ax1.set_title('Neural Network Function $u_\\theta$')
+
+    # Overlay the mesh and denote avg_vals if pwp and avg_vals are provided
+    if pwp is not None and avg_vals is not None:
+        triangles = pwp.triangles
+        for idx, tri in enumerate(triangles):
+            # Plot the three edges of the triangle
+            ax1.plot([tri[0][1], tri[1][1]], [tri[0][0], tri[1][0]], color='black', alpha=0.5, linewidth=0.5)
+            ax1.plot([tri[1][1], tri[2][1]], [tri[1][0], tri[2][0]], color='black', alpha=0.5, linewidth=0.5)
+            ax1.plot([tri[2][1], tri[0][1]], [tri[2][0], tri[0][0]], color='black', alpha=0.5, linewidth=0.5)
+            
+            # Compute the center of the triangle
+            center = np.mean(tri, axis=0)
+            
+            # Denote avg_val at the center
+            ax1.text(center[1], center[0], f'{avg_vals[idx]:.2f}', fontsize=6, color='black', ha='center', va='center')
+
+    # 1D plot at t = t_max
+    ax2.plot(x_grid, u_values[-1, :])
+    ax2.set_xlabel('x')
+    ax2.set_ylabel('$u_\\theta(t_{max}, x)$')
+    ax2.set_title(f'Neural Network Function at t = {t_max:.2f}')
+
+    # Adjust layout and display the main plot
+    plt.tight_layout()
+    # Upload the main figure to wandb
+    if upload_fig:
+        wandb.log({f"u_theta_tmin{t_min:.1f}_tmax_{t_max:.1f}": wandb.Image(fig)})
+    plt.show()
+
+    # Plot separate figures for each timestamp in ts
+    for t_val in ts:
+        # Find the closest index in t_grid
+        idx = np.argmin(np.abs(t_grid - t_val))
+        # Create a new figure for the snapshot
+        fig, ax = plt.subplots(1, 1, figsize=(10, 4))
+        ax.plot(x_grid, u_values[idx, :])
+        ax.set_xlabel('x')
+        ax.set_ylabel('$u_\\theta(t, x)$')
+        ax.set_title(f'Neural Network Function at t = {t_val:.2f} (closest t = {t_grid[idx]:.2f})')
+        plt.tight_layout()
+        plt.show()
