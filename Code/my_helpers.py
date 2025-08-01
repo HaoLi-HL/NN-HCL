@@ -627,11 +627,11 @@ def plot_comparison_seperate_combined_u_theta(seq_model, u_ref=None, file_path='
     plt.tight_layout()
     plt.show()
 
-def plot_u_theta_mesh(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=0.5, x_min=-1.0, x_max=1.0, ts=None, upload_fig=False, pwp=None, avg_vals=None):
+def plot_u_theta_mesh(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=0.5, x_min=-1.0, x_max=1.0, ts=None, upload_fig=False, pwp=None, vals=None):
     """
     Plot the neural network function u_theta over a specified domain [t_min, t_max] x [x_min, x_max],
     and include a 1D plot of u_theta at t = t_max. Additionally, plot separate 1D snapshots for each timestamp in ts if provided.
-    Optionally overlay the triangular mesh from PiecewiseLinearPolynomials and denote avg_vals on the triangles.
+    Optionally overlay the triangular mesh from PiecewiseLinearPolynomials and denote vals on the triangles.
 
     Args:
         model: Neural network u_theta.
@@ -645,7 +645,7 @@ def plot_u_theta_mesh(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=0
         ts: List or array of timestamps for which to plot individual 1D snapshots (default: None).
         upload_fig: Whether to upload the figure to wandb (default: False).
         pwp: Instance of PiecewiseLinearPolynomials to plot the mesh (default: None).
-        avg_vals: Average values to denote on each triangle (default: None).
+        vals: Values to denote on each triangle (default: None).
     """
     if ts is None:
         ts = []
@@ -679,8 +679,8 @@ def plot_u_theta_mesh(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=0
     ax1.set_ylabel('t')
     ax1.set_title('Neural Network Function $u_\\theta$')
 
-    # Overlay the mesh and denote avg_vals if pwp and avg_vals are provided
-    if pwp is not None and avg_vals is not None:
+    # Overlay the mesh and denote vals if pwp and vals are provided
+    if pwp is not None and vals is not None:
         triangles = pwp.triangles
         for idx, tri in enumerate(triangles):
             # Plot the three edges of the triangle
@@ -692,7 +692,7 @@ def plot_u_theta_mesh(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=0
             center = np.mean(tri, axis=0)
             
             # Denote avg_val at the center
-            ax1.text(center[1], center[0], f'{avg_vals[idx]:.2f}', fontsize=6, color='black', ha='center', va='center')
+            ax1.text(center[1], center[0], f'{vals[idx]:.2f}', fontsize=6, color='black', ha='center', va='center')
 
     # 1D plot at t = t_max
     ax2.plot(x_grid, u_values[-1, :])

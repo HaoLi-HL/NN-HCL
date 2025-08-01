@@ -13,7 +13,7 @@ import flax.linen as nn
 import optax
 import optax.tree_utils as otu
 from MGNN_class import MLP, MG_NN
-from my_helpers import plot_u_theta, plot_kh
+from my_helpers import plot_u_theta, plot_kh, plot_u_theta_mesh
 from functools import partial
 from Pwp_class import PiecewiseLinearPolynomials
 import wandb
@@ -181,16 +181,16 @@ class MinMaxOptProb:
             perturbations_all = self.sigma * jax.random.uniform(key, (self.N_perturb, 3), minval=-1, maxval=1)
         
         perturbed_coeffs_all = init_coeffs_all[:, None, :] + perturbations_all[None, :, :]
-        losses_all, loss_abs = vmap(self.loss_fn_elem_int_per_elem, in_axes=(0, 0, None))(jnp.arange(Nt), perturbed_coeffs_all, params)
-        best_indices = jnp.argmax(losses_all, axis=1)
-        # print(f"Nt: {Nt}, losses_all shape: {losses_all[:, best_indices].shape}")
+        loss_each_elem, loss_abs = vmap(self.loss_fn_elem_int_per_elem, in_axes=(0, 0, None))(jnp.arange(Nt), perturbed_coeffs_all, params)
+        best_indices = jnp.argmax(loss_each_elem, axis=1)
+        # print(f"Nt: {Nt}, loss_each_elem shape: {loss_each_elem[:, best_indices].shape}")
         # print(f"Nt: {Nt}, loss_abs shape: {loss_abs.shape}")
-        loss_eqn = jnp.sum(losses_all[jnp.arange(Nt), best_indices])
+        loss_eqn = jnp.sum(loss_each_elem[jnp.arange(Nt), best_indices])
         # Compute absolute loss, which is the L1 norm of the residual. Just for comparison and debugging. We do not use it in the optimization.
         loss_eqn_abs = jnp.sum(loss_abs)
         best_coeffs_all = perturbed_coeffs_all[jnp.arange(Nt), best_indices]
         # print(f"best_coeffs_all shape: {best_coeffs_all.shape}, perturbed_coeffs_all shape: {perturbed_coeffs_all.shape}")
-        return best_coeffs_all, current_key, loss_eqn, loss_eqn_abs
+        return best_coeffs_all, current_key, loss_eqn, loss_eqn_abs, loss_each_elem
 
     def loss_fn_elem_int_per_elem(self, tri_idx, p_coeffs_all, params):
         quad_points = self.pwp.quad_points_tri[tri_idx]
@@ -396,7 +396,7 @@ class MinMaxOptProb:
                 x_min=self.x_min,
                 x_max=self.x_max,
                 upload_fig=self.set_wandb
-            )
+                )
         
         print("\nStarting Train Stage with MGDL")
         if grade_epochs is None:
@@ -417,7 +417,19 @@ class MinMaxOptProb:
             params = self.model.mlps[grade_idx].params
             optimizer = self.optimizer_list[grade_idx]
             opt_state = self.opt_state_list[grade_idx]
-            self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs = self.maximize_kh(params, self.key)
+            self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs, loss_each_elem = self.maximize_kh(params, self.key)
+            plot_u_theta_mesh(   
+                model=self.model,
+                M_t=self.M_t,
+                M_x=self.M_x,
+                t_min=self.t_min,
+                t_max=self.t_max,
+                x_min=self.x_min,
+                x_max=self.x_max,
+                upload_fig=self.set_wandb,
+                pwp=self.pwp,
+                vals=loss_each_elem,
+                )
             if self.gamma > 0.0 and self.adjust_gamma:
                 self.gamma = self.determine_equation_weight(grade_idx, gamma_init=self.gamma)
                 print(f"Stage 1, Gamma: {self.gamma:.6f}")
@@ -454,6 +466,18 @@ class MinMaxOptProb:
                         x_min=self.x_min,
                         x_max=self.x_max,
                         upload_fig=True
+                        )
+                    plot_u_theta_mesh(   
+                        model=self.model,
+                        M_t=self.M_t,
+                        M_x=self.M_x,
+                        t_min=self.t_min,
+                        t_max=self.t_max,
+                        x_min=self.x_min,
+                        x_max=self.x_max,
+                        upload_fig=self.set_wandb,
+                        pwp=self.pwp,
+                        vals=loss_each_elem,
                         )
                 self.model.mlps[grade_idx].params = params
                 self.opt_state_list[grade_idx] = opt_state
