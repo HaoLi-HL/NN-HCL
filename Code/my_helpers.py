@@ -627,11 +627,12 @@ def plot_comparison_seperate_combined_u_theta(seq_model, u_ref=None, file_path='
     plt.tight_layout()
     plt.show()
 
+
 def plot_u_theta_mesh(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=0.5, x_min=-1.0, x_max=1.0, ts=None, upload_fig=False, pwp=None, vals=None):
     """
-    Plot the neural network function u_theta over a specified domain [t_min, t_max] x [x_min, x_max],
-    and include a 1D plot of u_theta at t = t_max. Additionally, plot separate 1D snapshots for each timestamp in ts if provided.
+    Plot the neural network function u_theta over a specified domain [t_min, t_max] x [x_min, x_max].
     Optionally overlay the triangular mesh from PiecewiseLinearPolynomials and denote vals on the triangles.
+    The 1D plot at t = t_max is removed, and only the 2D plot is shown.
 
     Args:
         model: Neural network u_theta.
@@ -639,8 +640,8 @@ def plot_u_theta_mesh(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=0
         M_t: Number of grid points in the t-direction (default: 1000).
         M_x: Number of grid points in the x-direction (default: 2000).
         t_min: Minimum value for t (default: 0.0).
-        t_max: Maximum value for t (default: 1.0).
-        x_min: Minimum value for x (default: 0.0).
+        t_max: Maximum value for t (default: 0.5).
+        x_min: Minimum value for x (default: -1.0).
         x_max: Maximum value for x (default: 1.0).
         ts: List or array of timestamps for which to plot individual 1D snapshots (default: None).
         upload_fig: Whether to upload the figure to wandb (default: False).
@@ -665,12 +666,10 @@ def plot_u_theta_mesh(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=0
         u_values = model.forward_with_params(params, tx_points) if hasattr(model, 'forward_with_params') else model(params, tx_points)
     u_values = u_values.reshape(M_t, M_x)  # Reshape to (M_t, M_x)
 
-    # Create larger figure with two subplots for the main plot
+    # Create larger figure for the 2D plot
     t_range = t_max - t_min
     fig = plt.figure(figsize=(20, 8 + 8 * t_range))
-    gs = gridspec.GridSpec(2, 1, height_ratios=[t_range, 1])
-    ax1 = fig.add_subplot(gs[0])
-    ax2 = fig.add_subplot(gs[1])
+    ax1 = fig.add_subplot(111)
 
     # 2D color mesh plot
     pcm = ax1.pcolormesh(x_grid, t_grid, u_values, shading='nearest', cmap='viridis')
@@ -693,12 +692,6 @@ def plot_u_theta_mesh(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=0
             
             # Denote avg_val at the center
             ax1.text(center[1], center[0], f'{vals[idx]:.2f}', fontsize=6, color='black', ha='center', va='center')
-
-    # 1D plot at t = t_max
-    ax2.plot(x_grid, u_values[-1, :])
-    ax2.set_xlabel('x')
-    ax2.set_ylabel('$u_\\theta(t_{max}, x)$')
-    ax2.set_title(f'Neural Network Function at t = {t_max:.2f}')
 
     # Adjust layout and display the main plot
     plt.tight_layout()
