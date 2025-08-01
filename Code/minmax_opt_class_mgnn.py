@@ -181,11 +181,12 @@ class MinMaxOptProb:
             perturbations_all = self.sigma * jax.random.uniform(key, (self.N_perturb, 3), minval=-1, maxval=1)
         
         perturbed_coeffs_all = init_coeffs_all[:, None, :] + perturbations_all[None, :, :]
-        loss_each_elem, loss_abs = vmap(self.loss_fn_elem_int_per_elem, in_axes=(0, 0, None))(jnp.arange(Nt), perturbed_coeffs_all, params)
-        best_indices = jnp.argmax(loss_each_elem, axis=1)
-        # print(f"Nt: {Nt}, loss_each_elem shape: {loss_each_elem[:, best_indices].shape}")
+        loss_all_test, loss_abs = vmap(self.loss_fn_elem_int_per_elem, in_axes=(0, 0, None))(jnp.arange(Nt), perturbed_coeffs_all, params)
+        best_indices = jnp.argmax(loss_all_test, axis=1)
+        # print(f"Nt: {Nt}, loss_all_test shape: {loss_all_test[:, best_indices].shape}")
         # print(f"Nt: {Nt}, loss_abs shape: {loss_abs.shape}")
-        loss_eqn = jnp.sum(loss_each_elem[jnp.arange(Nt), best_indices])
+        loss_each_elem = loss_all_test[jnp.arange(Nt), best_indices]
+        loss_eqn = jnp.sum(loss_each_elem)
         # Compute absolute loss, which is the L1 norm of the residual. Just for comparison and debugging. We do not use it in the optimization.
         loss_eqn_abs = jnp.sum(loss_abs)
         best_coeffs_all = perturbed_coeffs_all[jnp.arange(Nt), best_indices]
