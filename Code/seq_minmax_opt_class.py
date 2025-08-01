@@ -158,6 +158,8 @@ class SeqMinMaxOptProb:
                 use_loss_fn_elem_int=self.use_loss_fn_elem_int, total_grade=self.total_grade, k=self.k, use_a=self.use_a, seq_train=True, set_wandb=self.set_wandb,
                 f_plot=self.f_plot, M_t=self.M_t, M_x=self.M_x,
             )
+             # Store the segment and update previous_params with the trained parameters
+            self.segments.append(segment)
 
             # Plot before training
             print(f"\nPlotting before training segment [{t_min:.4f}, {t_max:.4f}]")
@@ -189,9 +191,6 @@ class SeqMinMaxOptProb:
                 x_max=self.x_max,
                 upload_fig=True
             )
-
-            # Store the segment and update previous_params with the trained parameters
-            self.segments.append(segment)
 
         # After training all segments, plot the combined output
         print("\nPlotting combined output across all segments from t=0 to total_t_max")
