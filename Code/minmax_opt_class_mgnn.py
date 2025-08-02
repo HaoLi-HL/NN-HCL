@@ -181,17 +181,17 @@ class MinMaxOptProb:
             perturbations_all = self.sigma * jax.random.uniform(key, (self.N_perturb, 3), minval=-1, maxval=1)
         
         perturbed_coeffs_all = init_coeffs_all[:, None, :] + perturbations_all[None, :, :]
-        loss_all_test, loss_abs = vmap(self.loss_fn_elem_int_per_elem, in_axes=(0, 0, None))(jnp.arange(Nt), perturbed_coeffs_all, params)
+        loss_all_test, loss_l1_all = vmap(self.loss_fn_elem_int_per_elem, in_axes=(0, 0, None))(jnp.arange(Nt), perturbed_coeffs_all, params)
         best_indices = jnp.argmax(loss_all_test, axis=1)
         # print(f"Nt: {Nt}, loss_all_test shape: {loss_all_test[:, best_indices].shape}")
-        # print(f"Nt: {Nt}, loss_abs shape: {loss_abs.shape}")
+        # print(f"Nt: {Nt}, loss_l1_all shape: {loss_l1_all.shape}")
         loss_each_elem = loss_all_test[jnp.arange(Nt), best_indices]
         loss_eqn = jnp.sum(loss_each_elem)
         # Compute absolute loss, which is the L1 norm of the residual. Just for comparison and debugging. We do not use it in the optimization.
-        loss_eqn_abs = jnp.sum(loss_abs)
+        loss_l1 = jnp.sum(loss_l1_all)
         best_coeffs_all = perturbed_coeffs_all[jnp.arange(Nt), best_indices]
         # print(f"best_coeffs_all shape: {best_coeffs_all.shape}, perturbed_coeffs_all shape: {perturbed_coeffs_all.shape}")
-        return best_coeffs_all, current_key, loss_eqn, loss_eqn_abs, loss_each_elem
+        return best_coeffs_all, current_key, loss_eqn, loss_l1, loss_each_elem
 
     def loss_fn_elem_int_per_elem(self, tri_idx, p_coeffs_all, params):
         quad_points = self.pwp.quad_points_tri[tri_idx]
@@ -208,8 +208,8 @@ class MinMaxOptProb:
         integrand_all = residual[None, :] * jnp.sign(u_quad[None, :] - k_h_quad_all)
         loss = jnp.sum(quad_weights[None, :] * integrand_all, axis=1)
         # Compute absolute loss, which is the L1 norm of the residual. Just for comparison and debugging. We do not use it in the optimization.
-        loss_abs = jnp.abs(residual)@quad_weights
-        return loss, loss_abs
+        loss_l1 = jnp.abs(residual)@quad_weights
+        return loss, loss_l1
     
     def compute_tv_loss(self, params):
         """Compute the Total Variation Diminishing (TVD) loss."""
@@ -419,7 +419,7 @@ class MinMaxOptProb:
             params = self.model.mlps[grade_idx].params
             optimizer = self.optimizer_list[grade_idx]
             opt_state = self.opt_state_list[grade_idx]
-            self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs, loss_each_elem = self.maximize_kh(params, self.key)
+            self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params, self.key)
             print(f"The largest $W^{{1,\infty}}$ norm of k_h coeffs is {jnp.max(jnp.abs(self.pwp.coeffs[:,1:])):.6f}")
             plot_u_theta_mesh(   
                 model=self.model,
@@ -443,7 +443,7 @@ class MinMaxOptProb:
                     print(f"Grade {grade_idx}, Iter {iter}, lambda_ic: {self.lambda_ic:.6f}, lambda_bc: {self.lambda_bc:.6f}, lambda_eqn: {self.lambda_eqn:.6f}")
                 loss_eqn, loss_ibc, params, opt_state = self.train_step(params, optimizer, opt_state)
                 if iter % self.f_opt_kh == 0:
-                    self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs, loss_each_elem = self.maximize_kh(params, self.key)
+                    self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params, self.key)
                 loss, (loss_eqn, loss_ibc) = self.loss_fn(params)
 
                 self.loss_eqn_history[grade_idx].append(loss_eqn)
@@ -454,13 +454,13 @@ class MinMaxOptProb:
                         self.best_params_list[grade_idx] = jax.tree_util.tree_map(jnp.copy, params)
 
                 if iter % 100 == 0:
-                    print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_eqn_from_kh: {loss_eqn_from_kh:.6f}, loss_eqn_abs: {loss_eqn_abs:.6f}, loss_ibc: {loss_ibc:.6f}")
+                    print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_eqn_from_kh: {loss_eqn_from_kh:.6f}, loss_l1: {loss_l1:.6f}, loss_ibc: {loss_ibc:.6f}")
                     print(f"The largest $W^{{1,\infty}}$ norm of k_h coeffs is {jnp.max(jnp.abs(self.pwp.coeffs[:,1:])):.6f}")
                     if self.set_wandb:
                         wandb.log({f"tmin{self.t_min:.1f}_tmax{self.t_max:.1f}_loss_eqn_grade{grade_idx}": loss_eqn, 
                                    f"tmin{self.t_min:.1f}_tmax{self.t_max:.1f}_loss_ibc_grade{grade_idx}": loss_ibc, 
                                    f"step": self.global_step + iter})
-                if iter % self.f_plot == 0:
+                if self.f_plot > 0 and iter % self.f_plot == 0:
                     plot_u_theta(
                         model=self.model,
                         M_t=self.M_t,
@@ -510,7 +510,7 @@ class MinMaxOptProb:
             self.opt_state_stage2 = self.optimizer_stage2.init(params_last_k)
             optimizer = self.optimizer_stage2
             opt_state = self.opt_state_stage2
-            self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs, loss_each_elem = self.maximize_kh(params_last_k, self.key)
+            self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params_last_k, self.key)
             print(f"The largest $W^{{1,\infty}}$ norm of k_h coeffs is {jnp.max(jnp.abs(self.pwp.coeffs[:,1:])):.6f}")
             monitor_start = int(0.9 * self.epoch_stage2)
             best_loss_eqn = float('inf')
@@ -521,7 +521,7 @@ class MinMaxOptProb:
                     print(f"Stage 2, Iter {iter}, lambda_ic: {self.lambda_ic:.6f}, lambda_bc: {self.lambda_bc:.6f}, lambda_eqn: {self.lambda_eqn:.6f}")
                 loss_eqn, loss_ibc, params_last_k, opt_state = self.train_step(params_last_k, optimizer, opt_state)
                 if iter % self.f_opt_kh == 0:
-                    self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs, loss_each_elem = self.maximize_kh(params_last_k, self.key)
+                    self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params_last_k, self.key)
                 loss_eqn = loss_eqn_fn(params_last_k)
                 loss_ibc = loss_data_fn(params_last_k)
                 if iter >= monitor_start:
@@ -604,13 +604,13 @@ class MinMaxOptProb:
             # Collect loss history
             loss_history_data = []
             loss_history_eqn = []
-            self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs, loss_each_elem = self.maximize_kh(current_params, self.key)
+            self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(current_params, self.key)
             for iter in range(self.N_test_gamma):
                 (loss, (loss_eqn, loss_data)), grads = jax.value_and_grad(total_loss, has_aux=True)(current_params)
                 updates, current_opt_state = optimizer.update(grads, current_opt_state)
                 current_params = optax.apply_updates(current_params, updates)
                 if iter % self.f_opt_kh == 0:
-                    self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs, loss_each_elem = self.maximize_kh(current_params, self.key)
+                    self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(current_params, self.key)
                 # Store losses
                 loss_eqn = loss_eqn_fn(current_params)
                 loss_data = loss_data_fn(current_params)
@@ -688,7 +688,7 @@ class MinMaxOptProb:
         print(f"Model loaded from {model_path} with hidden_dims_list: {loaded_hidden_dims_list}, loaded_total_grade = {loaded_data['total_grade']}.")
         self.opt_state_list = [opt.init(mlp.params) for opt, mlp in zip(self.optimizer_list, self.model.mlps)]
         self.gen_funcs(loaded_total_grade-1)
-        self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_eqn_abs, loss_each_elem = self.maximize_kh_step(loaded_params[-1], self.key)
+        self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh_step(loaded_params[-1], self.key)
         loss_eqn = self.loss_fn_eqn(loaded_params[-1])
         loss_ibc = self.loss_fn_ibc(loaded_params[-1])
         print(f"For the loaded model, loss_eqn: {loss_eqn:.6f}, Loss_bc: {loss_ibc:.6f}")
