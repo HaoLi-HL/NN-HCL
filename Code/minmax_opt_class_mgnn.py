@@ -365,7 +365,8 @@ class MinMaxOptProb:
 
         # Collect all parameters
         params = self.model.mlps[0].params
-        optimizer = optax.adam(pre_lr)
+        lr = optax.schedules.cosine_decay_schedule(init_value=pre_lr, decay_steps=pre_epochs)
+        optimizer = optax.adam(lr)
         opt_state = optimizer.init(params)
 
         def pre_loss(params):
