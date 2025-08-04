@@ -37,7 +37,8 @@ class MinMaxOptProb:
         # if self.seq_train is True, then we will not create a new wandb run but just use the existing one.
         # if self.seq_train is False and self.set_wandb is True, then we will create a new wandb run.
         
-
+        self.dt = (t_max - t_min) / N_t
+        self.dx = (x_max - x_min) / N_x
         self.t_min = t_min
         self.t_max = t_max
         self.x_min = x_min
@@ -90,7 +91,7 @@ class MinMaxOptProb:
         
         self.L1reg = L1reg
         # For 'normal' sampling method, we use a normal distribution to generate perturbations.
-        # For 'uniform' sampling method, we use a uniform distribution to generate perturbations, which has bounded $W^{{1,\infty}}$ norm.
+        # For 'uniform' sampling method, we use a uniform distribution to generate perturbations, which has bounded W^{1,inf} norm.
         self.sampling_method = sampling_method
         print(f"Using sampling method: {self.sampling_method}")
         self.project = project
@@ -109,7 +110,7 @@ class MinMaxOptProb:
             # lr = optax.schedules.constant_schedule(init_lrs[i])
             # lr = optax.schedules.exponential_decay(init_value=init_lrs[i], transition_steps=grade_epochs[i], decay_rate=decay_rates[i])
             # lr = optax.schedules.warmup_exponential_decay_schedule(init_value=1e-6, peak_value=init_lrs[i], warmup_steps=100, transition_steps=grade_epochs[i], decay_rate=decay_rates[i], end_value=1e-6)
-            lr = optax.schedules.warmup_cosine_decay_schedule(init_value=1e-6, peak_value=init_lrs[i], warmup_steps=100, decay_steps=grade_epochs[i], end_value=1e-5)
+            lr = optax.schedules.warmup_cosine_decay_schedule(init_value=1e-6, peak_value=init_lrs[i], warmup_steps=int(grade_epochs[i]/50), decay_steps=grade_epochs[i], end_value=1e-5)
             # lr = optax.schedules.cosine_decay_schedule(init_value=init_lrs[i], decay_steps=grade_epochs[i])
             self.lr_schedulers.append(lr)
             self.optimizer_list.append(optax.adam(self.lr_schedulers[i]))
@@ -166,17 +167,20 @@ class MinMaxOptProb:
 
     def maximize_kh_step(self, params, current_key):
         Nt = self.pwp.N_elements
-        vertices_all = self.pwp.triangles
-        u_values_all = self.u_eval(params, vertices_all.reshape(-1, 2)).reshape(Nt, 3)
-
         # find proper kh by generating samples for each triangle
         key, current_key = jax.random.split(current_key)
         if self.sampling_method == 'normal':
+            vertices_all = self.pwp.triangles
+            u_values_all = self.u_eval(params, vertices_all.reshape(-1, 2)).reshape(Nt, 3)
             A_all = jnp.stack([jnp.ones((Nt, 3)), vertices_all[:, :, 0], vertices_all[:, :, 1]], axis=-1)
             init_coeffs_all = jnp.linalg.solve(A_all, u_values_all[..., None]).squeeze(-1)
             perturbations_all = self.sigma * jax.random.normal(key, (self.N_perturb, 3))
         elif self.sampling_method == 'uniform':
-            avg_vals = jnp.average(u_values_all, axis=1)
+            # avg_vals = jnp.average(u_values_all, axis=1)
+            quad_points = self.pwp.quad_points_tri
+            u_values_all = self.u_eval(params, quad_points)
+            quad_weights = self.pwp.quad_weights_tri
+            avg_vals = jnp.einsum('ij,ij->i', u_values_all, quad_weights)*2/(self.dt*self.dx)
             init_coeffs_all = jnp.hstack([avg_vals[..., None] , jnp.zeros((Nt, 2))])
             perturbations_all = self.sigma * jax.random.uniform(key, (self.N_perturb, 3), minval=-1, maxval=1)
         
@@ -420,7 +424,7 @@ class MinMaxOptProb:
             optimizer = self.optimizer_list[grade_idx]
             opt_state = self.opt_state_list[grade_idx]
             self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params, self.key)
-            print(f"The largest $W^{{1,\infty}}$ norm of k_h coeffs is {jnp.max(jnp.abs(self.pwp.coeffs[:,1:])):.6f}")
+            print(f"The largest W^{{1,inf}} norm of k_h coeffs is {jnp.max(jnp.abs(self.pwp.coeffs[:,1:])):.6f}")
             plot_u_theta_mesh(   
                 model=self.model,
                 M_t=self.M_t,
@@ -455,7 +459,7 @@ class MinMaxOptProb:
 
                 if iter % 100 == 0:
                     print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_eqn_from_kh: {loss_eqn_from_kh:.6f}, loss_l1: {loss_l1:.6f}, loss_ibc: {loss_ibc:.6f}")
-                    print(f"The largest $W^{{1,\infty}}$ norm of k_h coeffs is {jnp.max(jnp.abs(self.pwp.coeffs[:,1:])):.6f}")
+                    print(f"The largest W^{{1,inf}} norm of k_h coeffs is {jnp.max(jnp.abs(self.pwp.coeffs[:,1:])):.6f}")
                     if self.set_wandb:
                         wandb.log({f"tmin{self.t_min:.1f}_tmax{self.t_max:.1f}_loss_eqn_grade{grade_idx}": loss_eqn, 
                                    f"tmin{self.t_min:.1f}_tmax{self.t_max:.1f}_loss_ibc_grade{grade_idx}": loss_ibc, 
@@ -511,7 +515,7 @@ class MinMaxOptProb:
             optimizer = self.optimizer_stage2
             opt_state = self.opt_state_stage2
             self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params_last_k, self.key)
-            print(f"The largest $W^{{1,\infty}}$ norm of k_h coeffs is {jnp.max(jnp.abs(self.pwp.coeffs[:,1:])):.6f}")
+            print(f"The largest W^{{1,inf}} norm of k_h coeffs is {jnp.max(jnp.abs(self.pwp.coeffs[:,1:])):.6f}")
             monitor_start = int(0.9 * self.epoch_stage2)
             best_loss_eqn = float('inf')
             best_params_last_k = None
@@ -530,7 +534,7 @@ class MinMaxOptProb:
                         best_params_last_k = jax.tree_util.tree_map(jnp.copy, params_last_k)
                 if iter % 100 == 0:
                     print(f"Stage 2, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_ibc: {loss_ibc:.6f}")
-                    print(f"The largest $W^{{1,\infty}}$ norm of k_h coeffs is {jnp.max(jnp.abs(self.pwp.coeffs[:,1:])):.6f}")
+                    print(f"The largest W^{{1,inf}} norm of k_h coeffs is {jnp.max(jnp.abs(self.pwp.coeffs[:,1:])):.6f}")
                     if self.set_wandb:
                         wandb.log({f"tmin{self.t_min:.1f}_tmax{self.t_max:.1f}_loss_eqn_second_stage": loss_eqn, 
                                    f"tmin{self.t_min:.1f}_tmax{self.t_max:.1f}_loss_ibc_second_stage": loss_ibc, 
