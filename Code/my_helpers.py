@@ -552,7 +552,7 @@ def plot_comparison_together(model, u_ref=None, file_path='data/burgers_sin_ref.
     plt.savefig(save_path, format='eps', bbox_inches='tight')
     plt.show()
 
-def plot_comparison_seperate_combined_u_theta(seq_model, u_ref=None, file_path='data/burgers_sin_ref.npz', ts=None, x_min=-1.0, x_max=1.0, M_x=601, save_eps=False):
+def plot_comparison_seperate_combined_u_theta(seq_model, u_ref=None, file_path='data/burgers_sin_ref.npz', ts=None, x_min=-1.0, x_max=1.0, M_x=601, save_eps=False, tol=1e-6):
     """
     Plot both the neural network solution and the reference solution for each timestamp in ts,
     with both solutions overlaid on the same axes in subplots (one subplot per timestamp).
@@ -595,11 +595,11 @@ def plot_comparison_seperate_combined_u_theta(seq_model, u_ref=None, file_path='
         # Find the segment that contains time t_val
         segment_index = None
         for j in range(len(seq_model.seq_T) - 1):
-            if seq_model.seq_T[j] <= t_val <= seq_model.seq_T[j + 1]:
+            if seq_model.seq_T[j] <= t_val <= seq_model.seq_T[j + 1] + tol:  # Allow a small tolerance for floating point errors
                 segment_index = j
                 break
         if segment_index is None:
-            if t_val == seq_model.seq_T[-1]:  # Allow t_val to be exactly at the end
+            if jnp.abs(t_val - seq_model.seq_T[-1]) < tol:  # Allow t_val to be exactly at the end
                 segment_index = len(seq_model.seq_T) - 2
             else:
                 raise ValueError(f"Time t_val={t_val} is outside the defined segments [{seq_model.seq_T[0]}, {seq_model.seq_T[-1]}]")
