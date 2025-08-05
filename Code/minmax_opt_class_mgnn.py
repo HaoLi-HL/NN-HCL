@@ -30,7 +30,7 @@ class MinMaxOptProb:
                  lambda_ic=10.0, lambda_bc=10.0, lambda_eqn=1.0, gamma=0.0, alpha=0.9, N_test_gamma = 1000, adjust_gamma=True,
                  L1reg=1, sampling_method='uniform', notes='', lambda_tv=0.0, N_t_pnts=None, N_x_pnts=None, pre_epochs=1000,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
-                 res=None, res_visc=None, use_loss_fn_elem_int=True, total_grade=1, k=0, use_a=True, M_t = 1000, M_x = 1000, f_plot=1000,
+                 res=None, res_visc=None, use_loss_fn_elem_int=True, total_grade=1, k=0, use_a=True, M_t = 1000, M_x = 1000, f_plot=1000, plt_err_dist=False,
                  seq_train=False, set_wandb=True):
         self.seq_train = seq_train  # Sequential training flag
         self.set_wandb = set_wandb
@@ -124,6 +124,7 @@ class MinMaxOptProb:
         self.opt_state_stage2 = None  # To be initialized later
 
         self.f_plot = f_plot
+        self.plt_err_dist = plt_err_dist
 
         if not self.seq_train and self.set_wandb:
             wandb.init(project=self.project, name=self.run_name, notes=self.notes,
@@ -360,17 +361,22 @@ class MinMaxOptProb:
         params = optax.apply_updates(params, updates)
         return all_losses[0], all_losses[1], params, opt_state
     
-    def pre_train_to_ic(self, pre_epochs=1000, pre_lr=1e-3, N_pre=10000):
+    def pre_train_to_ic(self, pre_epochs=1000, pre_lr=1e-3, N_pre=100000):
         print("\nPre-training the network to fit v(t, x) = u0(x)")
         # Generate pre-training points
         self.key, subkey = jax.random.split(self.key)
-        tx_pre = jax.random.uniform(subkey, (N_pre, 2), minval=self.lb, maxval=self.ub)
+        t_points = jnp.linspace(self.lb[0], self.ub[0], self.N_bc//2)
+        x_points = jnp.linspace(self.lb[1], self.ub[1], self.N_ic)
+        T, X = jnp.meshgrid(t_points, x_points)
+        tx_pre = jnp.stack([T.ravel(), X.ravel()], axis=1)
         y_pre = self.u0(tx_pre[:, 1])
 
         # Collect all parameters
         params = self.model.mlps[0].params
         # lr = optax.schedules.cosine_decay_schedule(init_value=pre_lr, decay_steps=pre_epochs)
-        optimizer = optax.adam(pre_lr)
+        # lr = optax.schedules.warmup_cosine_decay_schedule(init_value=1e-6, peak_value=pre_lr, warmup_steps=100, decay_steps=pre_epochs, end_value=1e-5)
+        lr = pre_lr
+        optimizer = optax.adam(lr)
         opt_state = optimizer.init(params)
 
         def pre_loss(params):
@@ -425,18 +431,19 @@ class MinMaxOptProb:
             opt_state = self.opt_state_list[grade_idx]
             self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params, self.key)
             print(f"The largest W^{{1,inf}} norm of k_h coeffs is {jnp.max(jnp.abs(self.pwp.coeffs[:,1:])):.6f}")
-            plot_u_theta_mesh(   
-                model=self.model,
-                M_t=self.M_t,
-                M_x=self.M_x,
-                t_min=self.t_min,
-                t_max=self.t_max,
-                x_min=self.x_min,
-                x_max=self.x_max,
-                upload_fig=self.set_wandb,
-                pwp=self.pwp,
-                vals=loss_each_elem,
-                )
+            if self.plt_err_dist:
+                plot_u_theta_mesh(   
+                    model=self.model,
+                    M_t=self.M_t,
+                    M_x=self.M_x,
+                    t_min=self.t_min,
+                    t_max=self.t_max,
+                    x_min=self.x_min,
+                    x_max=self.x_max,
+                    upload_fig=self.set_wandb,
+                    pwp=self.pwp,
+                    vals=loss_each_elem,
+                    )
             if self.gamma > 0.0 and self.adjust_gamma:
                 self.gamma = self.determine_equation_weight(grade_idx, gamma_init=self.gamma)
                 print(f"Stage 1, Gamma: {self.gamma:.6f}")
@@ -475,18 +482,19 @@ class MinMaxOptProb:
                         x_max=self.x_max,
                         upload_fig=True
                         )
-                    plot_u_theta_mesh(   
-                        model=self.model,
-                        M_t=self.M_t,
-                        M_x=self.M_x,
-                        t_min=self.t_min,
-                        t_max=self.t_max,
-                        x_min=self.x_min,
-                        x_max=self.x_max,
-                        upload_fig=self.set_wandb,
-                        pwp=self.pwp,
-                        vals=loss_each_elem,
-                        )
+                    if self.plt_err_dist:
+                        plot_u_theta_mesh(   
+                            model=self.model,
+                            M_t=self.M_t,
+                            M_x=self.M_x,
+                            t_min=self.t_min,
+                            t_max=self.t_max,
+                            x_min=self.x_min,
+                            x_max=self.x_max,
+                            upload_fig=self.set_wandb,
+                            pwp=self.pwp,
+                            vals=loss_each_elem,
+                            )
                 self.model.mlps[grade_idx].params = params
                 self.opt_state_list[grade_idx] = opt_state
 

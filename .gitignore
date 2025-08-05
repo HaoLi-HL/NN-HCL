@@ -9,8 +9,6 @@
 __pycache__/
 */__pycache__/
 
-# Data folders (exclude if large or sensitive)
-data/
 
 # Other temporary files
 *.pyc

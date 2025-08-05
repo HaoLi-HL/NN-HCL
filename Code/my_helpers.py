@@ -456,12 +456,12 @@ def plot_comparison_seperate(model, u_ref=None, file_path='data/burgers_sin_ref.
 
         # Plot both on the same axes
         ax = axs[i]
-        ax.plot(x, u_ref_t, label='Ref. solution', linewidth=2)
-        ax.plot(x, u_nn_t, label='NN solution', linestyle='--', linewidth=2)
+        ax.plot(x, u_ref_t, label='Ref. solution', linestyle='--', linewidth=2)
+        ax.plot(x, u_nn_t, label='NN solution', linewidth=2)
         ax.legend()
         ax.set_xlabel('x')
         ax.set_ylabel('u')
-        ax.set_title(f'Solutions at t = {t_val:.2f}' + (f' (numerical closest t = {times[idx]:.2f})' if u_ref is None else ''))
+        ax.set_title(f'Solutions at t = {t_val:.2f}')
 
     plt.tight_layout()
     plt.show()
@@ -519,6 +519,9 @@ def plot_comparison_together(model, u_ref=None, file_path='data/burgers_sin_ref.
     else:
         norms = 0.6 * (ts_array - min_t) / (max_t - min_t) + 0.4
 
+    # List of markers for reference lines
+    markers = ['o', 'v', '^', '<', '>', 's', 'p', '*', 'h', 'H', '+', 'x', 'D', 'd']
+
     for i, t_val in enumerate(ts):
         norm = norms[i]
         color = cmap(norm)
@@ -539,7 +542,7 @@ def plot_comparison_together(model, u_ref=None, file_path='data/burgers_sin_ref.
         u_nn_t = np.asarray(u_nn_values).squeeze()  # Shape: (n_x,)
 
         # Plot both on the same axes with same color
-        ax.plot(x, u_ref_t, linestyle='--', color=color, linewidth=3, label=f'Ref. solution t={t_val:.2f}')
+        ax.plot(x, u_ref_t, linestyle='--', color=color, linewidth=3, marker=markers[i % len(markers)], markevery=30, label=f'Ref. solution t={t_val:.2f}')
         ax.plot(x, u_nn_t, linestyle='-', color=color, linewidth=2, label=f'NN solution t={t_val:.2f}')
 
     ax.legend()
@@ -552,7 +555,7 @@ def plot_comparison_together(model, u_ref=None, file_path='data/burgers_sin_ref.
     plt.savefig(save_path, format='eps', bbox_inches='tight')
     plt.show()
 
-def plot_comparison_seperate_combined_u_theta(seq_model, u_ref=None, file_path='data/burgers_sin_ref.npz', ts=None, x_min=-1.0, x_max=1.0, M_x=601):
+def plot_comparison_seperate_combined_u_theta(seq_model, u_ref=None, file_path='data/burgers_sin_ref.npz', ts=None, x_min=-1.0, x_max=1.0, M_x=601, save_eps=False, tol=1e-6):
     """
     Plot both the neural network solution and the reference solution for each timestamp in ts,
     with both solutions overlaid on the same axes in subplots (one subplot per timestamp).
@@ -565,6 +568,7 @@ def plot_comparison_seperate_combined_u_theta(seq_model, u_ref=None, file_path='
         x_min: Minimum x value (default: -1.0).
         x_max: Maximum x value (default: 1.0).
         M_x: Number of x grid points (default: 601).
+        save_eps: Whether to save each figure as .eps file (default: False).
     """
     if ts is None:
         ts = []
@@ -583,11 +587,10 @@ def plot_comparison_seperate_combined_u_theta(seq_model, u_ref=None, file_path='
         times = np.array(ts)
         u_num = np.array([u_ref(t, x) for t in times])  # Shape: (len(ts), n_x)
 
-    # Create subplots: one for each timestamp
-    fig, axs = plt.subplots(len(ts), 1, figsize=(10, 4 * len(ts)), squeeze=False)
-    axs = axs.flatten()  # Ensure axs is iterable even for len(ts)=1
-
     for i, t_val in enumerate(ts):
+        # Create a new figure for each timestamp
+        fig, ax = plt.subplots(1, 1, figsize=(10, 4))
+
         # Reference solution: find closest time index or use exact t_val
         idx = np.argmin(np.abs(times - t_val)) if u_ref is None else i
         u_ref_t = u_num[idx, :]
@@ -595,11 +598,11 @@ def plot_comparison_seperate_combined_u_theta(seq_model, u_ref=None, file_path='
         # Find the segment that contains time t_val
         segment_index = None
         for j in range(len(seq_model.seq_T) - 1):
-            if seq_model.seq_T[j] <= t_val <= seq_model.seq_T[j + 1]:
+            if seq_model.seq_T[j] <= t_val <= seq_model.seq_T[j + 1] + tol:  # Allow a small tolerance for floating point errors
                 segment_index = j
                 break
         if segment_index is None:
-            if t_val == seq_model.seq_T[-1]:  # Allow t_val to be exactly at the end
+            if jnp.abs(t_val - seq_model.seq_T[-1]) < tol:  # Allow t_val to be exactly at the end
                 segment_index = len(seq_model.seq_T) - 2
             else:
                 raise ValueError(f"Time t_val={t_val} is outside the defined segments [{seq_model.seq_T[0]}, {seq_model.seq_T[-1]}]")
@@ -616,17 +619,17 @@ def plot_comparison_seperate_combined_u_theta(seq_model, u_ref=None, file_path='
         u_nn_t = np.asarray(u_nn_values).squeeze()  # Shape: (n_x,)
 
         # Plot both on the same axes
-        ax = axs[i]
-        ax.plot(x, u_ref_t, label='Ref. solution', linewidth=2)
-        ax.plot(x, u_nn_t, label='NN solution', linestyle='--', linewidth=2)
+        ax.plot(x, u_ref_t, label='Ref. solution', linestyle='--', linewidth=2)
+        ax.plot(x, u_nn_t, label='NN solution', linewidth=2)
         ax.legend()
         ax.set_xlabel('x')
         ax.set_ylabel('u')
-        ax.set_title(f'Solutions at t = {t_val:.2f}' + (f' (numerical closest t = {times[idx]:.2f})' if u_ref is None else ''))
+        ax.set_title(f'Ref. solution at t = {t_val:.2f}')
 
-    plt.tight_layout()
-    plt.show()
-
+        plt.tight_layout()
+        if save_eps:
+            plt.savefig(f"plot_t_{t_val:.2f}.eps", format='eps', bbox_inches='tight')
+        plt.show()
 
 def plot_u_theta_mesh(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=0.5, x_min=-1.0, x_max=1.0, ts=None, upload_fig=False, pwp=None, vals=None):
     """
