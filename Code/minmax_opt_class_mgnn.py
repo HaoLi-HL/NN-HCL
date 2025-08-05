@@ -365,7 +365,10 @@ class MinMaxOptProb:
         print("\nPre-training the network to fit v(t, x) = u0(x)")
         # Generate pre-training points
         self.key, subkey = jax.random.split(self.key)
-        tx_pre = jax.random.uniform(subkey, (N_pre, 2), minval=self.lb, maxval=self.ub)
+        t_points = jnp.linspace(self.lb[0], self.ub[0], self.N_bc//2)
+        x_points = jnp.linspace(self.lb[1], self.ub[1], self.N_ic)
+        T, X = jnp.meshgrid(t_points, x_points)
+        tx_pre = jnp.stack([T.ravel(), X.ravel()], axis=1)
         y_pre = self.u0(tx_pre[:, 1])
 
         # Collect all parameters
