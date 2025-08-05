@@ -15,3 +15,7 @@ __pycache__/
 *.log
 
 Code/wandb/
+
+data/
+
+Code/data/
