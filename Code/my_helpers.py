@@ -519,6 +519,9 @@ def plot_comparison_together(model, u_ref=None, file_path='data/burgers_sin_ref.
     else:
         norms = 0.6 * (ts_array - min_t) / (max_t - min_t) + 0.4
 
+    # List of markers for reference lines
+    markers = ['o', 'v', '^', '<', '>', 's', 'p', '*', 'h', 'H', '+', 'x', 'D', 'd']
+
     for i, t_val in enumerate(ts):
         norm = norms[i]
         color = cmap(norm)
@@ -539,7 +542,7 @@ def plot_comparison_together(model, u_ref=None, file_path='data/burgers_sin_ref.
         u_nn_t = np.asarray(u_nn_values).squeeze()  # Shape: (n_x,)
 
         # Plot both on the same axes with same color
-        ax.plot(x, u_ref_t, linestyle='--', color=color, linewidth=3, label=f'Ref. solution t={t_val:.2f}')
+        ax.plot(x, u_ref_t, linestyle='--', color=color, linewidth=3, marker=markers[i % len(markers)], markevery=30, label=f'Ref. solution t={t_val:.2f}')
         ax.plot(x, u_nn_t, linestyle='-', color=color, linewidth=2, label=f'NN solution t={t_val:.2f}')
 
     ax.legend()
