@@ -361,7 +361,7 @@ class MinMaxOptProb:
         params = optax.apply_updates(params, updates)
         return all_losses[0], all_losses[1], params, opt_state
     
-    def pre_train_to_ic(self, pre_epochs=1000, pre_lr=1e-3, N_pre=10000):
+    def pre_train_to_ic(self, pre_epochs=1000, pre_lr=1e-3, N_pre=100000):
         print("\nPre-training the network to fit v(t, x) = u0(x)")
         # Generate pre-training points
         self.key, subkey = jax.random.split(self.key)
