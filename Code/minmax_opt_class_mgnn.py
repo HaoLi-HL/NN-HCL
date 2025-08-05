@@ -459,7 +459,7 @@ class MinMaxOptProb:
 
                 if iter % 100 == 0:
                     print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_eqn_from_kh: {loss_eqn_from_kh:.6f}, loss_l1: {loss_l1:.6f}, loss_ibc: {loss_ibc:.6f}")
-                    print(f"The largest W^{{1,inf}} norm of k_h coeffs is {jnp.max(jnp.abs(self.pwp.coeffs[:,1:])):.6f}")
+                    # print(f"The largest W^{{1,inf}} norm of k_h coeffs is {jnp.max(jnp.abs(self.pwp.coeffs[:,1:])):.6f}")
                     if self.set_wandb:
                         wandb.log({f"tmin{self.t_min:.1f}_tmax{self.t_max:.1f}_loss_eqn_grade{grade_idx}": loss_eqn, 
                                    f"tmin{self.t_min:.1f}_tmax{self.t_max:.1f}_loss_ibc_grade{grade_idx}": loss_ibc, 
