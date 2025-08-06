@@ -470,6 +470,7 @@ class MinMaxOptProb:
                     if self.set_wandb:
                         wandb.log({f"tmin{self.t_min:.1f}_tmax{self.t_max:.1f}_loss_eqn_grade{grade_idx}": loss_eqn, 
                                    f"tmin{self.t_min:.1f}_tmax{self.t_max:.1f}_loss_ibc_grade{grade_idx}": loss_ibc, 
+                                   f"tmin{self.t_min:.1f}_tmax{self.t_max:.1f}_loss_l1_grade{grade_idx}": loss_l1, 
                                    f"step": self.global_step + iter})
                 if self.f_plot > 0 and iter % self.f_plot == 0:
                     plot_u_theta(
@@ -546,6 +547,7 @@ class MinMaxOptProb:
                     if self.set_wandb:
                         wandb.log({f"tmin{self.t_min:.1f}_tmax{self.t_max:.1f}_loss_eqn_second_stage": loss_eqn, 
                                    f"tmin{self.t_min:.1f}_tmax{self.t_max:.1f}_loss_ibc_second_stage": loss_ibc, 
+                                   f"tmin{self.t_min:.1f}_tmax{self.t_max:.1f}_loss_l1_second_stage": loss_l1, 
                                    f"step": self.global_step + iter})
             # Assign the best params found in the last 10%
             if best_params_last_k is not None:

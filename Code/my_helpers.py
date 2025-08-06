@@ -7,6 +7,7 @@ from jax import vmap
 import wandb
 from os.path import splitext
 import matplotlib.gridspec as gridspec
+from matplotlib import cm
 
 
 def plot_loss_history(loss_int, loss_bc, title):
@@ -22,7 +23,7 @@ def plot_loss_history(loss_int, loss_bc, title):
     plt.show()
 
 
-def plot_u_theta(prob, params=None, M_t=1000, M_t_per_segment=1000, M_x=2000, t_min=None, t_max=None, x_min=None, x_max=None, ts=None, upload_fig=False, save_path=None):
+def plot_u_theta(prob, params=None, M_t=1000, M_t_per_segment=1000, M_x=2000, t_min=None, t_max=None, x_min=None, x_max=None, ts=None, upload_fig=False, save_path=None, fontsize=16):
     """
     Plot the neural network function u_theta over a specified domain [t_min, t_max] x [x_min, x_max],
     and include a 1D plot of u_theta at t = t_max. Additionally, plot separate 1D snapshots for each timestamp in ts if provided.
@@ -41,6 +42,7 @@ def plot_u_theta(prob, params=None, M_t=1000, M_t_per_segment=1000, M_x=2000, t_
         ts: List or array of timestamps for which to plot individual 1D snapshots (default: None).
         upload_fig: Whether to upload the figure to wandb (default: False).
         save_path: Path to save the figure (default: None, does not save if None).
+        fontsize: Font size for axis labels, ticks, title, and annotations (default: 12).
     """
     if ts is None:
         ts = []
@@ -141,10 +143,13 @@ def plot_u_theta(prob, params=None, M_t=1000, M_t_per_segment=1000, M_x=2000, t_
     ax1 = fig1.add_subplot(111)
     pcm = ax1.pcolormesh(x_grid, t_grid, u_values, shading='nearest', cmap='viridis')
     pcm.set_rasterized(True)  # Rasterize the mesh to reduce EPS size
-    fig1.colorbar(pcm, ax=ax1)
-    ax1.set_xlabel('x')
-    ax1.set_ylabel('t')
-    # ax1.set_title('Neural Network Function $u_\\theta$' if not is_sequential else f'Combined Neural Network $u_\\theta$ over [{t_min}, {t_max}]')
+    cbar = fig1.colorbar(pcm, ax=ax1)
+    # cbar.set_label('$u_\\theta(t, x)$', fontsize=fontsize)
+    cbar.ax.tick_params(labelsize=fontsize)
+    ax1.set_xlabel('x', fontsize=fontsize)
+    ax1.set_ylabel('t', fontsize=fontsize)
+    ax1.tick_params(labelsize=fontsize)
+    # ax1.set_title('Neural Network Function $u_\\theta$' if not is_sequential else f'Combined Neural Network $u_\\theta$ over [{t_min}, {t_max}]', fontsize=fontsize)
     plt.tight_layout()
 
     # Upload and save the 2D figure
@@ -160,9 +165,10 @@ def plot_u_theta(prob, params=None, M_t=1000, M_t_per_segment=1000, M_x=2000, t_
     fig2 = plt.figure(figsize=(10, 4))
     ax2 = fig2.add_subplot(111)
     ax2.plot(x_grid, u_at_max)
-    ax2.set_xlabel('x')
-    ax2.set_ylabel('$u_\\theta(t_{max}, x)$')
-    ax2.set_title(f'Neural Network Function at t = {t_max:.2f}')
+    ax2.set_xlabel('x', fontsize=fontsize)
+    # ax2.set_ylabel('$u_\\theta(t_{max}, x)$', fontsize=fontsize)
+    ax2.tick_params(labelsize=fontsize)
+    ax2.set_title(f'Neural Network Function at t = {t_max:.2f}', fontsize=fontsize)
     plt.tight_layout()
 
     # Upload and save the 1D figure
@@ -197,9 +203,10 @@ def plot_u_theta(prob, params=None, M_t=1000, M_t_per_segment=1000, M_x=2000, t_
         # Create a new figure for the snapshot
         fig, ax = plt.subplots(1, 1, figsize=(10, 4))
         ax.plot(x_grid, u_at_t)
-        ax.set_xlabel('x')
-        ax.set_ylabel('$u_\\theta(t, x)$')
-        ax.set_title(f'Neural Network Function at t = {t_val:.2f} (closest t = {closest_t:.2f})')
+        ax.set_xlabel('x', fontsize=fontsize)
+        ax.set_ylabel('$u_\\theta(t, x)$', fontsize=fontsize)
+        ax.tick_params(labelsize=fontsize)
+        ax.set_title(f'Neural Network Function at t = {t_val:.2f} (closest t = {closest_t:.2f})', fontsize=fontsize)
         plt.tight_layout()
         plt.show()
 
@@ -507,6 +514,110 @@ def compute_errors_combined_u_theta(seq_model, u_ref=None, file_path='data/burge
 
     return err_T, err_spacetime
 
+def plot_comparison_together(prob, u_ref=None, file_path='data/burgers_sin_ref.npz', 
+                             params=None, ts=None, save_path='data/sine_wave_plot_together.eps', title=None, x_min=-1.0, x_max=1.0, M_x=601, tol=1e-6, fontsize=16):
+    """
+    Plot both the neural network solution (solid line) and the reference solution (dashed line)
+    for each timestamp in ts, with all comparisons overlaid on the same single figure. For each
+    time, the pair of lines (numerical and neural) share the same color, progressing from light
+    to dark as time increases.
+
+    Args:
+        prob: Instance of MinMaxOptProb or SeqMinMaxOptProb representing the neural network(s).
+        u_ref: Reference function u_ref(t, x) where t is scalar and x is array (default: None).
+        file_path: Path to the .npz file containing 'times', 'x', and 'u' (default: 'data/burgers_sin_ref.npz').
+        params: Parameters (pytree) of the neural network (default: None).
+        ts: List or array of timestamps for which to plot the solutions (default: None).
+        save_path: Path to save the .eps file (default: 'data/sine_wave_plot_together.eps').
+        title: Title of the plot (default: None).
+        x_min: Minimum x value (default: -1.0).
+        x_max: Maximum x value (default: 1.0).
+        M_x: Number of x grid points (default: 601).
+        tol: Tolerance for floating point comparison in sequential case (default: 1e-6).
+        fontsize: Font size for axis labels, ticks, title, and legend (default: 12).
+    """
+    if ts is None:
+        ts = []
+    if not ts:
+        print("No timestamps provided. Nothing to plot.")
+        return
+
+    # Determine if it's a sequential problem
+    is_sequential = hasattr(prob, 'num_segments') and hasattr(prob, 'segments') and hasattr(prob, 'seq_T')
+
+    # Load numerical solution data or use reference function
+    if u_ref is None:
+        data = np.load(file_path)
+        times = data['times']
+        x = data['x']
+        u_num = data['u']  # Shape: (n_times, n_x)
+    else:
+        x = np.linspace(x_min, x_max, M_x)
+        times = np.array(ts)
+        u_num = np.array([u_ref(t, x) for t in times])  # Shape: (len(ts), n_x)
+
+    # Create a single figure and axes
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    # Get colormap (distinct colors)
+    cmap = plt.cm.tab10
+    norms = np.linspace(0, 1, len(ts))
+
+    # List of markers for reference lines
+    markers = ['o', 'v', '^', '<', '>', 's', 'p', '*', 'h', 'H', '+', 'x', 'D', 'd']
+
+    for i, t_val in enumerate(ts):
+        norm = norms[i]
+        color = cmap(norm)
+
+        # Reference solution: find closest time index or use exact t_val
+        idx = np.argmin(np.abs(times - t_val)) if u_ref is None else i
+        u_ref_t = u_num[idx, :]
+
+        # Neural network solution: evaluate at exact t_val on the same x grid
+        x_jnp = jnp.asarray(x)
+        t_jnp = jnp.full_like(x_jnp, t_val)
+        tx_points = jnp.stack([t_jnp, x_jnp], axis=1)  # Shape: (n_x, 2)
+
+        if is_sequential:
+            # Find the segment that contains time t_val
+            segment_index = None
+            for j in range(len(prob.seq_T) - 1):
+                if prob.seq_T[j] <= t_val <= prob.seq_T[j + 1] + tol:  # Allow a small tolerance for floating point errors
+                    segment_index = j
+                    break
+            if segment_index is None:
+                if jnp.abs(t_val - prob.seq_T[-1]) < tol:  # Allow t_val to be exactly at the end
+                    segment_index = len(prob.seq_T) - 2
+                else:
+                    raise ValueError(f"Time t_val={t_val} is outside the defined segments [{prob.seq_T[0]}, {prob.seq_T[-1]}]")
+            # Get the segment
+            segment = prob.segments[segment_index]
+            u_nn_values = segment.model.forward(tx_points)
+        else:
+            if params is None:
+                u_nn_values = prob.model.forward(tx_points)
+            else:
+                u_nn_values = prob.model(params, tx_points)
+
+        u_nn_t = np.asarray(u_nn_values).squeeze()  # Shape: (n_x,)
+
+        # Plot both on the same axes with same color
+        ax.plot(x, u_ref_t, linestyle='--', color=color, linewidth=2, marker=markers[i % len(markers)], markevery=30, label=f'Ref. solution t={t_val:.2f}')
+        ax.plot(x, u_nn_t, linestyle='-', color=color, linewidth=2, label=f'NN solution t={t_val:.2f}')
+
+    # Set font sizes
+    ax.tick_params(axis='both', which='major', labelsize=fontsize)
+    ax.set_xlabel('x', fontsize=fontsize)
+    ax.set_ylabel('u', fontsize=fontsize)
+    if title is not None:
+        ax.set_title(title, fontsize=fontsize)
+    ax.legend(fontsize=fontsize)
+
+    plt.tight_layout()
+    plt.savefig(save_path, format='eps', bbox_inches='tight')
+    plt.show()
+
 
 def plot_comparison_seperate(model, u_ref=None, file_path='data/burgers_sin_ref.npz', 
                              params=None, ts=None, x_min=-1.0, x_max=1.0, M_x=601):
@@ -571,173 +682,6 @@ def plot_comparison_seperate(model, u_ref=None, file_path='data/burgers_sin_ref.
         ax.set_title(f'Solutions at t = {t_val:.2f}')
 
     plt.tight_layout()
-    plt.show()
-
-
-def plot_comparison_together(model, u_ref=None, file_path='data/burgers_sin_ref.npz', 
-                             params=None, ts=None, save_path='../results/sine_wave_plot_together.eps', title=None, x_min=-1.0, x_max=1.0, M_x=601):
-    """
-    Plot both the neural network solution (solid line) and the reference solution (dashed line)
-    for each timestamp in ts, with all comparisons overlaid on the same single figure. For each
-    time, the pair of lines (numerical and neural) share the same color, progressing from light
-    to dark as time increases.
-
-    Args:
-        model: Neural network u_theta.
-        u_ref: Reference function u_ref(t, x) where t is scalar and x is array (default: None).
-        file_path: Path to the .npz file containing 'times', 'x', and 'u' (default: 'data/burgers_sin_ref.npz').
-        params: Parameters (pytree) of the neural network (default: None).
-        ts: List or array of timestamps for which to plot the solutions (default: None).
-        save_path: Path to save the .eps file (default: 'data/sine_wave_plot_together.eps').
-        title: Title of the plot (default: None).
-        x_min: Minimum x value (default: -1.0).
-        x_max: Maximum x value (default: 1.0).
-        M_x: Number of x grid points (default: 601).
-    """
-    if ts is None:
-        ts = []
-    if not ts:
-        print("No timestamps provided. Nothing to plot.")
-        return
-
-    # Load numerical solution data or use reference function
-    if u_ref is None:
-        data = np.load(file_path)
-        times = data['times']
-        x = data['x']
-        u_num = data['u']  # Shape: (n_times, n_x)
-    else:
-        x = np.linspace(x_min, x_max, M_x)
-        times = np.array(ts)
-        u_num = np.array([u_ref(t, x) for t in times])  # Shape: (len(ts), n_x)
-
-    # Create a single figure and axes
-    fig, ax = plt.subplots(figsize=(10, 6))
-
-    # Get colormap (light to dark blue)
-    cmap = plt.cm.Blues
-
-    # Normalize times for color mapping
-    ts_array = np.array(ts)
-    min_t = ts_array.min()
-    max_t = ts_array.max()
-    if min_t == max_t:
-        norms = np.full(len(ts), 0.5)  # Medium color if all times are the same
-    else:
-        norms = 0.6 * (ts_array - min_t) / (max_t - min_t) + 0.4
-
-    # List of markers for reference lines
-    markers = ['o', 'v', '^', '<', '>', 's', 'p', '*', 'h', 'H', '+', 'x', 'D', 'd']
-
-    for i, t_val in enumerate(ts):
-        norm = norms[i]
-        color = cmap(norm)
-
-        # Reference solution: find closest time index or use exact t_val
-        idx = np.argmin(np.abs(times - t_val)) if u_ref is None else i
-        u_ref_t = u_num[idx, :]
-
-        # Neural network solution: evaluate at exact t_val on the same x grid
-        x_jnp = jnp.asarray(x)
-        t_jnp = jnp.full_like(x_jnp, t_val)
-        tx_points = jnp.stack([t_jnp, x_jnp], axis=1)  # Shape: (n_x, 2)
-
-        if params is None:
-            u_nn_values = model.forward(tx_points)
-        else:
-            u_nn_values = model(params, tx_points)
-        u_nn_t = np.asarray(u_nn_values).squeeze()  # Shape: (n_x,)
-
-        # Plot both on the same axes with same color
-        ax.plot(x, u_ref_t, linestyle='--', color=color, linewidth=3, marker=markers[i % len(markers)], markevery=30, label=f'Ref. solution t={t_val:.2f}')
-        ax.plot(x, u_nn_t, linestyle='-', color=color, linewidth=2, label=f'NN solution t={t_val:.2f}')
-
-    ax.legend()
-    ax.set_xlabel('x')
-    ax.set_ylabel('u')
-    if title is not None:
-        ax.set_title(title)
-
-    plt.tight_layout()
-    plt.savefig(save_path, format='eps', bbox_inches='tight')
-    plt.show()
-
-def plot_comparison_together_combined_u_theta(seq_model, u_ref=None, file_path='data/burgers_sin_ref.npz',
-                             ts=None, save_path='data/sine_wave_plot_together.eps', title=None, x_min=-1.0, x_max=1.0, M_x=601, tol=1e-6):
-    """
-    Plot both the neural network solution (solid line) and the reference solution (dashed line)
-    for each timestamp in ts, with all comparisons overlaid on the same single figure. For each
-    time, the pair of lines (numerical and neural) share the same color, progressing from light
-    to dark as time increases.
-    Args:
-        seq_model: Instance of SeqMinMaxOptProb representing the combined neural networks.
-        u_ref: Reference function u_ref(t, x) where t is scalar and x is array (default: None).
-        file_path: Path to the .npz file containing 'times', 'x', and 'u' (default: 'data/burgers_sin_ref.npz').
-        ts: List or array of timestamps for which to plot the solutions (default: None).
-        save_path: Path to save the .eps file (default: 'data/sine_wave_plot_together.eps').
-        title: Title of the plot (default: None).
-        x_min: Minimum x value (default: -1.0).
-        x_max: Maximum x value (default: 1.0).
-        M_x: Number of x grid points (default: 601).
-        tol: Tolerance for floating point comparison (default: 1e-6).
-    """
-    if ts is None:
-        ts = []
-    if not ts:
-        print("No timestamps provided. Nothing to plot.")
-        return
-    # Load numerical solution data or use reference function
-    if u_ref is None:
-        data = np.load(file_path)
-        times = data['times']
-        x = data['x']
-        u_num = data['u']  # Shape: (n_times, n_x)
-    else:
-        x = np.linspace(x_min, x_max, M_x)
-        times = np.array(ts)
-        u_num = np.array([u_ref(t, x) for t in times])  # Shape: (len(ts), n_x)
-    # Create a single figure and axes
-    fig, ax = plt.subplots(figsize=(10, 6))
-    # Get colormap (distinct colors)
-    cmap = plt.cm.tab10
-    norms = np.linspace(0, 1, len(ts))
-    # List of markers for reference lines
-    markers = ['o', 'v', '*', 'h', 'H', '+', 'x', 'D', 'd', '^', '<', '>', 's', 'p']
-    for i, t_val in enumerate(ts):
-        norm = norms[i]
-        color = cmap(norm)
-        # Reference solution: find closest time index or use exact t_val
-        idx = np.argmin(np.abs(times - t_val)) if u_ref is None else i
-        u_ref_t = u_num[idx, :]
-        # Find the segment that contains time t_val
-        segment_index = None
-        for j in range(len(seq_model.seq_T) - 1):
-            if seq_model.seq_T[j] <= t_val <= seq_model.seq_T[j + 1] + tol:  # Allow a small tolerance for floating point errors
-                segment_index = j
-                break
-        if segment_index is None:
-            if jnp.abs(t_val - seq_model.seq_T[-1]) < tol:  # Allow t_val to be exactly at the end
-                segment_index = len(seq_model.seq_T) - 2
-            else:
-                raise ValueError(f"Time t_val={t_val} is outside the defined segments [{seq_model.seq_T[0]}, {seq_model.seq_T[-1]}]")
-        # Get the segment
-        segment = seq_model.segments[segment_index]
-        # Neural network solution: evaluate at exact t_val on the same x grid
-        x_jnp = jnp.asarray(x)
-        t_jnp = jnp.full_like(x_jnp, t_val)
-        tx_points = jnp.stack([t_jnp, x_jnp], axis=1)  # Shape: (n_x, 2)
-        u_nn_values = segment.model.forward(tx_points)
-        u_nn_t = np.asarray(u_nn_values).squeeze()  # Shape: (n_x,)
-        # Plot both on the same axes with same color
-        ax.plot(x, u_ref_t, linestyle='--', color=color, linewidth=2, marker=markers[i % len(markers)], markevery=30, label=f'Ref. solution t={t_val:.2f}')
-        ax.plot(x, u_nn_t, linestyle='-', color=color, linewidth=2, label=f'NN solution t={t_val:.2f}')
-    ax.legend()
-    ax.set_xlabel('x')
-    ax.set_ylabel('u')
-    if title is not None:
-        ax.set_title(title)
-    plt.tight_layout()
-    plt.savefig(save_path, format='eps', bbox_inches='tight')
     plt.show()
 
 def plot_comparison_seperate_combined_u_theta(seq_model, u_ref=None, file_path='data/burgers_sin_ref.npz', ts=None, x_min=-1.0, x_max=1.0, M_x=601, save_eps=False, tol=1e-6):
