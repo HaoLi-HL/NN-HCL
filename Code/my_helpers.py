@@ -5,6 +5,8 @@ from flax import linen as nn
 from NN_class import MLP
 from jax import vmap
 import wandb
+from os.path import splitext
+import matplotlib.gridspec as gridspec
 
 
 def plot_loss_history(loss_int, loss_bc, title):
@@ -19,80 +21,185 @@ def plot_loss_history(loss_int, loss_bc, title):
     plt.title(title)
     plt.show()
 
-import matplotlib.gridspec as gridspec
-# Function to plot u_theta
-def plot_u_theta(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=1.0, x_min=0.0, x_max=1.0, ts=None, upload_fig=False):
+
+def plot_u_theta(prob, params=None, M_t=1000, M_t_per_segment=1000, M_x=2000, t_min=None, t_max=None, x_min=None, x_max=None, ts=None, upload_fig=False, save_path=None):
     """
     Plot the neural network function u_theta over a specified domain [t_min, t_max] x [x_min, x_max],
     and include a 1D plot of u_theta at t = t_max. Additionally, plot separate 1D snapshots for each timestamp in ts if provided.
+    The function handles both MinMaxOptProb (single segment) and SeqMinMaxOptProb (multiple segments).
 
     Args:
-        model: Neural network u_theta.
-        params: Parameters (pytree) of the neural network.
-        M_t: Number of grid points in the t-direction (default: 1000).
-        M_x: Number of grid points in the x-direction (default: 1000).
-        t_min: Minimum value for t (default: 0.0).
-        t_max: Maximum value for t (default: 1.0).
-        x_min: Minimum value for x (default: 0.0).
-        x_max: Maximum value for x (default: 1.0).
+        prob: The optimization problem object (MinMaxOptProb or SeqMinMaxOptProb).
+        params: Parameters (pytree) of the neural network (default: None, uses prob's internal if available).
+        M_t: Number of grid points in the t-direction for single segment (default: 1000).
+        M_t_per_segment: Number of grid points in t per segment for sequential (default: 1000).
+        M_x: Number of grid points in the x-direction (default: 2000).
+        t_min: Minimum value for t (default: prob.total_t_min or 0.0).
+        t_max: Maximum value for t (default: prob.total_t_max or 1.0).
+        x_min: Minimum value for x (default: prob.x_min or 0.0).
+        x_max: Maximum value for x (default: prob.x_max or 1.0).
         ts: List or array of timestamps for which to plot individual 1D snapshots (default: None).
+        upload_fig: Whether to upload the figure to wandb (default: False).
+        save_path: Path to save the figure (default: None, does not save if None).
     """
     if ts is None:
         ts = []
 
-    # Create a grid for t and x over the specified ranges
-    t_grid = jnp.linspace(t_min, t_max, M_t)
-    x_grid = jnp.linspace(x_min, x_max, M_x)
-    t, x = jnp.meshgrid(t_grid, x_grid, indexing='ij')  # Shapes: (M_t, M_x)
+    # Determine if it's a sequential problem
+    is_sequential = hasattr(prob, 'num_segments') and hasattr(prob, 'segments') and hasattr(prob, 'seq_T')
 
-    # Flatten the grid for batch evaluation
-    tx_points = jnp.stack([t.ravel(), x.ravel()], axis=1)  # Shape: (M_t * M_x, 2)
+    # Set defaults for t_min, t_max, x_min, x_max if not provided
+    if t_min is None:
+        t_min = getattr(prob, 'total_t_min', 0.0)
+    if t_max is None:
+        t_max = getattr(prob, 'total_t_max', 1.0)
+    if x_min is None:
+        x_min = getattr(prob, 'x_min', 0.0)
+    if x_max is None:
+        x_max = getattr(prob, 'x_max', 1.0)
 
-    # Evaluate u_theta on the grid points
-    if params is None:
-        u_values = model.forward(tx_points)
+    if is_sequential:
+        # Sequential case
+        num_segments = prob.num_segments
+        seq_T = prob.seq_T
+
+        # Generate time grids for each segment
+        t_grids = []
+        for i in range(num_segments):
+            seg_t_min = seq_T[i]
+            seg_t_max = seq_T[i + 1]
+            t_segment = jnp.linspace(seg_t_min, seg_t_max, M_t_per_segment + 1)[:-1]  # Exclude endpoint to avoid overlap
+            t_grids.append(t_segment)
+
+        # Concatenate all segment time grids into a full time grid
+        t_grid_full = jnp.concatenate(t_grids)
+
+        # Create the spatial grid
+        x_grid = jnp.linspace(x_min, x_max, M_x)
+
+        # Create a meshgrid for t and x
+        t, x = jnp.meshgrid(t_grid_full, x_grid, indexing='ij')  # Shapes: (total_M_t, M_x)
+
+        # Flatten the grid for evaluation
+        tx_points_full = jnp.stack([t.ravel(), x.ravel()], axis=1)  # Shape: (total_M_t * M_x, 2)
+
+        # Determine which segment each time point belongs to
+        segment_indices = jnp.digitize(tx_points_full[:, 0], seq_T) - 1
+        segment_indices = jnp.clip(segment_indices, 0, num_segments - 1)
+
+        # Collect outputs from each segment
+        u_values_full_list = []
+        for i in range(num_segments):
+            mask = (segment_indices == i)
+            tx_points_segment = tx_points_full[mask]
+            if tx_points_segment.size > 0:
+                segment = prob.segments[i]
+                if params is None:
+                    u_values_segment = segment.model.forward(tx_points_segment)
+                else:
+                    u_values_segment = segment.model(params, tx_points_segment) if hasattr(segment.model, '__call__') else segment.model.forward(tx_points_segment)
+                u_values_full_list.append(u_values_segment)
+
+        # Combine all segment outputs into a single array
+        u_values_full = jnp.concatenate(u_values_full_list).reshape(len(t_grid_full), M_x)
+
+        t_grid = t_grid_full
+        u_values = u_values_full
+
+        # For 1D at t_max: use the last segment
+        last_segment = prob.segments[-1]
+        t_jnp = jnp.full_like(x_grid, t_max)
+        tx_points_max = jnp.stack([t_jnp, x_grid], axis=1)
+        if params is None:
+            u_at_max = last_segment.model.forward(tx_points_max)
+        else:
+            u_at_max = last_segment.model(params, tx_points_max) if hasattr(last_segment.model, '__call__') else last_segment.model.forward(tx_points_max)
+
     else:
-        u_values = model(params, tx_points)  # Shape: (M_t * M_x, 1)
-    u_values = u_values.reshape(M_t, M_x)  # Reshape to (M_t, M_x)
+        # Single segment case
+        t_grid = jnp.linspace(t_min, t_max, M_t)
+        x_grid = jnp.linspace(x_min, x_max, M_x)
+        t, x = jnp.meshgrid(t_grid, x_grid, indexing='ij')  # Shapes: (M_t, M_x)
 
-    # Create figure with two subplots for the main plot
-    # Create figure with two subplots for the main plot, with size proportional to (t_max - t_min)
+        # Flatten the grid for batch evaluation
+        tx_points = jnp.stack([t.ravel(), x.ravel()], axis=1)  # Shape: (M_t * M_x, 2)
+
+        # Evaluate u_theta on the grid points
+        if params is None:
+            u_values = prob.model.forward(tx_points)
+        else:
+            u_values = prob.model(params, tx_points) if hasattr(prob.model, '__call__') else prob.model.forward(tx_points)
+        u_values = u_values.reshape(len(t_grid), M_x)  # Reshape to (M_t, M_x)
+
+        u_at_max = u_values[-1, :]
+
+    # Calculate t_range for figure sizes
     t_range = t_max - t_min
-    fig = plt.figure(figsize=(10, 4 + 4 * t_range))
-    gs = gridspec.GridSpec(2, 1, height_ratios=[t_range, 1])
-    ax1 = fig.add_subplot(gs[0])
-    ax2 = fig.add_subplot(gs[1])
 
-    # 2D color mesh plot
+    # First figure: 2D color mesh plot
+    fig1 = plt.figure(figsize=(10, 5 * t_range if t_range > 0 else 4))
+    ax1 = fig1.add_subplot(111)
     pcm = ax1.pcolormesh(x_grid, t_grid, u_values, shading='nearest', cmap='viridis')
-    fig.colorbar(pcm, ax=ax1, label='$u_\\theta(t, x)$')
+    pcm.set_rasterized(True)  # Rasterize the mesh to reduce EPS size
+    fig1.colorbar(pcm, ax=ax1, label='$u_\\theta(t, x)$')
     ax1.set_xlabel('x')
     ax1.set_ylabel('t')
-    ax1.set_title('Neural Network Function $u_\\theta$')
+    # ax1.set_title('Neural Network Function $u_\\theta$' if not is_sequential else f'Combined Neural Network $u_\\theta$ over [{t_min}, {t_max}]')
+    plt.tight_layout()
 
-    # 1D plot at t = t_max
-    ax2.plot(x_grid, u_values[-1, :])
+    # Upload and save the 2D figure
+    if upload_fig:
+        wandb.log({f"u_theta_2d_tmin{t_min:.1f}_tmax_{t_max:.1f}": wandb.Image(fig1)})
+    if save_path:
+        base, ext = splitext(save_path)
+        plt.savefig(save_path, dpi=300)
+
+    plt.show()
+
+    # Second figure: 1D plot at t = t_max
+    fig2 = plt.figure(figsize=(10, 4))
+    ax2 = fig2.add_subplot(111)
+    ax2.plot(x_grid, u_at_max)
     ax2.set_xlabel('x')
     ax2.set_ylabel('$u_\\theta(t_{max}, x)$')
-    ax2.set_title(f'Neural Network Function at t = {t_max:2f}')
-
-    # Adjust layout and display the main plot
+    ax2.set_title(f'Neural Network Function at t = {t_max:.2f}')
     plt.tight_layout()
-    # Upload the main figure to wandb
+
+    # Upload and save the 1D figure
     if upload_fig:
-        wandb.log({f"u_theta_tmin{t_min:.1f}_tmax_{t_max:.1f}": wandb.Image(fig)})
+        wandb.log({f"u_theta_1d_tmax_{t_max:.1f}": wandb.Image(fig2)})
+    # if save_path:
+    #     base, ext = splitext(save_path)
+    #     plt.savefig(f"{base}_t{t_max:.2f}{ext}")
+
     plt.show()
 
     # Plot separate figures for each timestamp in ts
     for t_val in ts:
-        # Find the closest index in t_grid
-        idx = jnp.argmin(jnp.abs(t_grid - t_val))
+        if is_sequential:
+            # Find which segment t_val belongs to
+            seg_idx = jnp.digitize(jnp.array([t_val]), prob.seq_T) - 1
+            seg_idx = int(jnp.clip(seg_idx, 0, prob.num_segments - 1))
+            segment = prob.segments[seg_idx]
+            t_jnp = jnp.full_like(x_grid, t_val)
+            tx_points_t = jnp.stack([t_jnp, x_grid], axis=1)
+            if params is None:
+                u_at_t = segment.model.forward(tx_points_t)
+            else:
+                u_at_t = segment.model(params, tx_points_t) if hasattr(segment.model, '__call__') else segment.model.forward(tx_points_t)
+            closest_t = t_val  # Exact since evaluated at t_val
+        else:
+            # Find the closest index in t_grid
+            idx = jnp.argmin(jnp.abs(t_grid - t_val))
+            u_at_t = u_values[idx, :]
+            closest_t = t_grid[idx]
+
         # Create a new figure for the snapshot
         fig, ax = plt.subplots(1, 1, figsize=(10, 4))
-        ax.plot(x_grid, u_values[idx, :])
+        ax.plot(x_grid, u_at_t)
         ax.set_xlabel('x')
         ax.set_ylabel('$u_\\theta(t, x)$')
-        ax.set_title(f'Neural Network Function at t = {t_val:.2f} (closest t = {t_grid[idx]:.2f})')
+        ax.set_title(f'Neural Network Function at t = {t_val:.2f} (closest t = {closest_t:.2f})')
         plt.tight_layout()
         plt.show()
 
@@ -468,7 +575,7 @@ def plot_comparison_seperate(model, u_ref=None, file_path='data/burgers_sin_ref.
 
 
 def plot_comparison_together(model, u_ref=None, file_path='data/burgers_sin_ref.npz', 
-                             params=None, ts=None, save_path='data/sine_wave_plot_together.eps', title=None, x_min=-1.0, x_max=1.0, M_x=601):
+                             params=None, ts=None, save_path='../results/sine_wave_plot_together.eps', title=None, x_min=-1.0, x_max=1.0, M_x=601):
     """
     Plot both the neural network solution (solid line) and the reference solution (dashed line)
     for each timestamp in ts, with all comparisons overlaid on the same single figure. For each
