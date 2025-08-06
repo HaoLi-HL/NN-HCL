@@ -141,7 +141,7 @@ def plot_u_theta(prob, params=None, M_t=1000, M_t_per_segment=1000, M_x=2000, t_
     ax1 = fig1.add_subplot(111)
     pcm = ax1.pcolormesh(x_grid, t_grid, u_values, shading='nearest', cmap='viridis')
     pcm.set_rasterized(True)  # Rasterize the mesh to reduce EPS size
-    fig1.colorbar(pcm, ax=ax1, label='$u_\\theta(t, x)$')
+    fig1.colorbar(pcm, ax=ax1)
     ax1.set_xlabel('x')
     ax1.set_ylabel('t')
     # ax1.set_title('Neural Network Function $u_\\theta$' if not is_sequential else f'Combined Neural Network $u_\\theta$ over [{t_min}, {t_max}]')
@@ -322,7 +322,7 @@ def plot_numerical_solution(file_path='data/burgers_sin_ref.npz', ts=None):
 
     # 2D color mesh plot
     pcm = ax1.pcolormesh(x, times, u, shading='nearest', cmap='viridis')
-    fig.colorbar(pcm, ax=ax1, label='$u(t, x)$')
+    fig.colorbar(pcm, ax=ax1)
     ax1.set_xlabel('x')
     ax1.set_ylabel('t')
     ax1.set_title('Numerical Solution $u$')
@@ -861,7 +861,7 @@ def plot_u_theta_mesh(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=0
 
     # 2D color mesh plot
     pcm = ax1.pcolormesh(x_grid, t_grid, u_values, shading='nearest', cmap='viridis')
-    fig.colorbar(pcm, ax=ax1, label='$u_\\theta(t, x)$')
+    fig.colorbar(pcm, ax=ax1)
     ax1.set_xlabel('x')
     ax1.set_ylabel('t')
     ax1.set_title('Neural Network Function $u_\\theta$')
