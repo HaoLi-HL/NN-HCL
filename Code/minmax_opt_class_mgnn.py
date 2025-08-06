@@ -49,7 +49,8 @@ class MinMaxOptProb:
         self.lb = jnp.array([t_min, x_min])
         self.ub = jnp.array([t_max, x_max])
         self.h = (x_max - x_min)/N_x
-        self.model = MG_NN(input_dim=2, hidden_dims_list=hidden_dims_list, activation=nn.tanh, lb=self.lb, ub=self.ub, seed=seed, use_a=use_a)
+        self.use_a = use_a  # Whether to use the adaptive parameter a in MLP
+        self.model = MG_NN(input_dim=2, hidden_dims_list=hidden_dims_list, activation=nn.tanh, lb=self.lb, ub=self.ub, seed=seed, use_a=self.use_a)
         self.total_grade = len(hidden_dims_list)  # Number of grades for MGDL
         self.k = k  # Number of grades to refine in second stage
         self.key = jax.random.PRNGKey(seed)
@@ -93,7 +94,7 @@ class MinMaxOptProb:
         # For 'normal' sampling method, we use a normal distribution to generate perturbations.
         # For 'uniform' sampling method, we use a uniform distribution to generate perturbations, which has bounded W^{1,inf} norm.
         self.sampling_method = sampling_method
-        print(f"Using sampling method: {self.sampling_method}")
+        # print(f"Using sampling method: {self.sampling_method}")
         self.project = project
         self.notes = notes
         self.run_name = f"tmin{t_min:.1f}_tmax{t_max:.1f}_Nt{N_t}_Nx{N_x}_lrs{init_lrs[0]}_eps{grade_epochs[0]}_L1reg{L1reg}_sig{sigma}_gam{gamma}_Np{N_perturb}_sd{seed}"
@@ -399,8 +400,9 @@ class MinMaxOptProb:
         if self.pre_epochs>0:
             self.pre_train_to_ic(self.pre_epochs)
             print(f"The pre-train to fit initial finished.")
+            self.gen_funcs(grade_idx)
             plot_u_theta(
-                model=self.model,
+                prob=self,
                 M_t=self.M_t,
                 M_x=self.M_x,
                 t_min=self.t_min,
@@ -474,7 +476,7 @@ class MinMaxOptProb:
                                    f"step": self.global_step + iter})
                 if self.f_plot > 0 and iter % self.f_plot == 0:
                     plot_u_theta(
-                        model=self.model,
+                        prob=self,
                         M_t=self.M_t,
                         M_x=self.M_x,
                         t_min=self.t_min,
@@ -676,32 +678,42 @@ class MinMaxOptProb:
 
     def save_model(self, model_path):
         os.makedirs(os.path.dirname(model_path), exist_ok=True)
-        save_dict = {
+        save_dict = self.save_model_dict()
+        with open(model_path, 'wb') as f:
+            pickle.dump(save_dict, f)
+
+    def save_model_dict(self):
+        """Helper method to create a dict for saving individual segment models."""
+        return {
             'params': [mlp.params for mlp in self.model.mlps],
             'hidden_dims_list': self.model.hidden_dims_list,
             'total_grade': self.total_grade,
             'lb': self.lb,
             'ub': self.ub,
+            'usa_a': self.usa_a,
         }
-        with open(model_path, 'wb') as f:
-            pickle.dump(save_dict, f)
    
-    def load_model(self, model_path):
-        with open(model_path, 'rb') as f:
-            loaded_data = pickle.load(f)
+    def load_model_dict(self, loaded_data):
+        """Helper method to load individual segment models from dict."""
         loaded_params = loaded_data['params']
         loaded_hidden_dims_list = loaded_data['hidden_dims_list']
         loaded_total_grade = loaded_data['total_grade']
         lb = loaded_data['lb']
         ub = loaded_data['ub']
-        self.model = MG_NN(input_dim=2, hidden_dims_list=loaded_hidden_dims_list, activation=nn.tanh, lb=lb, ub=ub)
-        for i in range(self.total_grade):
-            self.model.add_grade()  # Add a new grade
+        usa_a = loaded_data['usa_a']
+        self.model = MG_NN(input_dim=2, hidden_dims_list=loaded_hidden_dims_list, activation=nn.tanh, lb=lb, ub=ub, use_a=usa_a)
+        for i in range(loaded_total_grade):
+            self.model.add_grade()
         for mlp, params in zip(self.model.mlps, loaded_params):
             mlp.params = params
-        print(f"Model loaded from {model_path} with hidden_dims_list: {loaded_hidden_dims_list}, loaded_total_grade = {loaded_data['total_grade']}.")
         self.opt_state_list = [opt.init(mlp.params) for opt, mlp in zip(self.optimizer_list, self.model.mlps)]
         self.gen_funcs(loaded_total_grade-1)
+   
+    def load_model(self, model_path):
+        with open(model_path, 'rb') as f:
+            loaded_data = pickle.load(f)
+        self.load_model_dict(loaded_data)
+        loaded_params = loaded_data['params']
         self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh_step(loaded_params[-1], self.key)
         loss_eqn = self.loss_fn_eqn(loaded_params[-1])
         loss_ibc = self.loss_fn_ibc(loaded_params[-1])

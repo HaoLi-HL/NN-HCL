@@ -1,7 +1,8 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
-import optax
+import flax.linen as nn
+from MGNN_class import MLP, MG_NN
 from datetime import datetime
 import os
 import pickle
@@ -15,13 +16,13 @@ import matplotlib.gridspec as gridspec
 
 
 class SeqMinMaxOptProb:
-    def __init__(self, num_segments, total_t_min, total_t_max, x_min=0, x_max=1, seq_T=None, N_t=10, N_x=10, N_bc=2048, N_ic=4096, hidden_dims_list=[(64, 64, 64, 64)], seed=0, 
+    def __init__(self, num_segments=1, total_t_min=0, total_t_max=1, x_min=0, x_max=1, seq_T=None, N_t=10, N_x=10, N_bc=2048, N_ic=4096, hidden_dims_list=[(64, 64, 64, 64)], seed=0, 
                  sigma=0.1, N_perturb=10000, k_h_rf_times=2, f_adaptive_weight=1000, f_opt_kh=1, u0=None, u1=None, u2=None, project="seq_minmax_burgers",
                  lambda_ic=10.0, lambda_bc=10.0, lambda_eqn=1.0, alpha=0.9, gamma=0.0, N_test_gamma=1000, adjust_gamma=True,
                  L1reg=0, sampling_method='uniform', notes='', lambda_tv=1.0, N_t_pnts=None, N_x_pnts=None, pre_epochs=1000,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  res=None, res_visc=None, use_loss_fn_elem_int=True, total_grade=1, k=0, use_a=True, f_plot=1000, plt_err_dist=False,
-                 M_t=1000, M_x=2000, set_wandb=True):
+                 M_t=1000, M_x=2000, set_wandb=False):
         """
         Initialize the sequential training class.
 
@@ -199,29 +200,78 @@ class SeqMinMaxOptProb:
         wandb.finish()
 
 
-    def save_model(self, model_path_prefix):
-        """
-        Save the model parameters for all segments.
+def save_seq_model(seq_obj, model_path_prefix):
+    """
+    Save the model parameters for all segments.
 
-        Args:
-            model_path_prefix (str): Prefix for the model file paths.
-        """
-        for i, segment in enumerate(self.segments):
-            model_path = f"{model_path_prefix}_segment_{i}.pkl"
-            segment.save_model(model_path)
-            print(f"Saved segment {i} model to {model_path}")
+    Args:
+        seq_obj: Instance of SeqMinMaxOptProb.
+        model_path_prefix (str): Prefix for the model file paths.
+    """
+    os.makedirs(os.path.dirname(model_path_prefix), exist_ok=True)
+    save_dict = {
+        'seq_T': seq_obj.seq_T,
+        'num_segments': seq_obj.num_segments,
+        'segments_params': [segment.save_model_dict() for segment in seq_obj.segments],
+        'total_t_min': seq_obj.total_t_min,
+        'total_t_max': seq_obj.total_t_max,
+        'x_min': seq_obj.x_min,
+        'x_max': seq_obj.x_max,
+        'config': {
+            'u0': seq_obj.u0,
+            'u1': seq_obj.u1,
+            'u2': seq_obj.u2,
+            'res': seq_obj.res,
+            'N_t': seq_obj.N_t,
+            'N_x': seq_obj.N_x,
+            'hidden_dims_list': seq_obj.hidden_dims_list,
+            'seed': seq_obj.seed,
+            'sigma': seq_obj.sigma,
+            'N_perturb': seq_obj.N_perturb,
+            'N_bc': seq_obj.N_bc,
+            'N_ic': seq_obj.N_ic,
+            'k_h_rf_times': seq_obj.k_h_rf_times,
+            'lambda_ic': seq_obj.lambda_ic,
+            'lambda_bc': seq_obj.lambda_bc,
+            'lambda_eqn': seq_obj.lambda_eqn,
+            'gamma': seq_obj.gamma,
+            'alpha': seq_obj.alpha,
+            'N_test_gamma': seq_obj.N_test_gamma,
+            'adjust_gamma': seq_obj.adjust_gamma,
+            'L1reg': seq_obj.L1reg,
+            'sampling_method': seq_obj.sampling_method,
+            'lambda_tv': seq_obj.lambda_tv,
+            'N_t_pnts': seq_obj.N_t_pnts,
+            'N_x_pnts': seq_obj.N_x_pnts,
+            'set_wandb': seq_obj.set_wandb
+        }
+    }
+    model_path = f"{model_path_prefix}.pkl"
+    with open(model_path, 'wb') as f:
+        pickle.dump(save_dict, f)
+    print(f"Saved entire sequence model to {model_path}")
 
-    def load_model(self, model_path_prefix):
-        """
-        Load the model parameters for all segments.
+def load_seq_model(model_path):
+    """
+    Load the model parameters for all segments into the seq_obj.
 
-        Args:
-            model_path_prefix (str): Prefix for the model file paths.
-        """
-        if not self.segments:
-            raise ValueError("Segments must be trained or initialized before loading models.")
-        for i in range(self.num_segments):
-            model_path = f"{model_path_prefix}_segment_{i}.pkl"
-            segment = self.segments[i]
-            segment.load_model(model_path)
-            print(f"Loaded segment {i} model from {model_path}")
+    Args:
+        model_path (str): Path to the saved sequence model file.
+    """
+    with open(model_path, 'rb') as f:
+        loaded_data = pickle.load(f)
+    config = loaded_data['config']
+    seq_obj = SeqMinMaxOptProb(num_segments=loaded_data['num_segments'], total_t_min=loaded_data['total_t_min'], total_t_max=loaded_data['total_t_max'], 
+                               x_min=loaded_data['x_min'], x_max=loaded_data['x_max'], **config)
+    seq_obj.seq_T = loaded_data['seq_T']
+    seq_obj.num_segments = loaded_data['num_segments']
+    
+    seq_obj.segments = []
+    for segment_params in loaded_data['segments_params']:
+        segment = MinMaxOptProb(
+            **config
+        )
+        segment.load_model_dict(segment_params)
+        seq_obj.segments.append(segment)
+    print(f"Loaded entire sequence model from {model_path}")
+    return seq_obj
