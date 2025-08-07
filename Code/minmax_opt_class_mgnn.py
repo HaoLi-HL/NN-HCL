@@ -482,7 +482,7 @@ class MinMaxOptProb:
                         t_max=self.t_max,
                         x_min=self.x_min,
                         x_max=self.x_max,
-                        upload_fig=True
+                        upload_fig=self.set_wandb
                         )
                     if self.plt_err_dist:
                         plot_u_theta_mesh(   
