@@ -400,7 +400,6 @@ class MinMaxOptProb:
         if self.pre_epochs>0:
             self.pre_train_to_ic(self.pre_epochs)
             print(f"The pre-train to fit initial finished.")
-            self.gen_funcs(grade_idx)
             plot_u_theta(
                 prob=self,
                 M_t=self.M_t,
