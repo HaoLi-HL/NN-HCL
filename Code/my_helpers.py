@@ -150,6 +150,7 @@ def plot_u_theta(prob, params=None, M_t=1000, M_t_per_segment=1000, M_x=2000, t_
     ax1.set_ylabel('t', fontsize=fontsize)
     ax1.tick_params(labelsize=fontsize)
     # ax1.set_title('Neural Network Function $u_\\theta$' if not is_sequential else f'Combined Neural Network $u_\\theta$ over [{t_min}, {t_max}]', fontsize=fontsize)
+    ax1.set_yticks(np.linspace(t_min, t_max, int((t_max-t_min)//0.25)+1))
     plt.tight_layout()
 
     # Upload and save the 2D figure
@@ -157,7 +158,7 @@ def plot_u_theta(prob, params=None, M_t=1000, M_t_per_segment=1000, M_x=2000, t_
         wandb.log({f"u_theta_2d_tmin{t_min:.1f}_tmax_{t_max:.1f}": wandb.Image(fig1)})
     if save_path:
         base, ext = splitext(save_path)
-        plt.savefig(save_path, dpi=300)
+        plt.savefig(save_path, dpi=100)
 
     plt.show()
 

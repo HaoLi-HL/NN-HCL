@@ -689,7 +689,7 @@ class MinMaxOptProb:
             'total_grade': self.total_grade,
             'lb': self.lb,
             'ub': self.ub,
-            'usa_a': self.usa_a,
+            'use_a': self.use_a,
         }
    
     def load_model_dict(self, loaded_data):
@@ -699,8 +699,8 @@ class MinMaxOptProb:
         loaded_total_grade = loaded_data['total_grade']
         lb = loaded_data['lb']
         ub = loaded_data['ub']
-        usa_a = loaded_data['usa_a']
-        self.model = MG_NN(input_dim=2, hidden_dims_list=loaded_hidden_dims_list, activation=nn.tanh, lb=lb, ub=ub, use_a=usa_a)
+        use_a = loaded_data['use_a']
+        self.model = MG_NN(input_dim=2, hidden_dims_list=loaded_hidden_dims_list, activation=nn.tanh, lb=lb, ub=ub, use_a=use_a)
         for i in range(loaded_total_grade):
             self.model.add_grade()
         for mlp, params in zip(self.model.mlps, loaded_params):
