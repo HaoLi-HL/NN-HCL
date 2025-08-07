@@ -34,6 +34,7 @@ class MinMaxOptProb:
                  seq_train=False, set_wandb=True):
         self.seq_train = seq_train  # Sequential training flag
         self.set_wandb = set_wandb
+        print(f"self.set_wandb: {self.set_wandb}")
         # if self.seq_train is True, then we will not create a new wandb run but just use the existing one.
         # if self.seq_train is False and self.set_wandb is True, then we will create a new wandb run.
         
