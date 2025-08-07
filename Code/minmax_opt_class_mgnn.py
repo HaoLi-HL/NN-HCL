@@ -510,7 +510,7 @@ class MinMaxOptProb:
         train_total_time = end_time - start_time
         print(f"Train time for stage1: {train_total_time:.6f} seconds")
 
-    def train_process_stage2(self, save_model=True):
+    def train_process_stage2(self, save_model=False):
         # Stage 2: Refinement of Last k Grades
         if self.k > 0 and self.k <= self.total_grade:
             start_time = time.perf_counter()
