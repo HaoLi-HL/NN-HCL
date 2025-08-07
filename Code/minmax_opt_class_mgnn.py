@@ -31,10 +31,9 @@ class MinMaxOptProb:
                  L1reg=1, sampling_method='uniform', notes='', lambda_tv=0.0, N_t_pnts=None, N_x_pnts=None, pre_epochs=1000,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  res=None, res_visc=None, use_loss_fn_elem_int=True, total_grade=1, k=0, use_a=True, M_t = 1000, M_x = 1000, f_plot=1000, plt_err_dist=False,
-                 seq_train=False, set_wandb=True):
+                 seq_train=False, set_wandb=False):
         self.seq_train = seq_train  # Sequential training flag
         self.set_wandb = set_wandb
-        print(f"self.set_wandb: {self.set_wandb}")
         # if self.seq_train is True, then we will not create a new wandb run but just use the existing one.
         # if self.seq_train is False and self.set_wandb is True, then we will create a new wandb run.
         
