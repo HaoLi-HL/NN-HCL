@@ -333,13 +333,13 @@ def plot_numerical_solution(file_path='data/burgers_sin_ref.npz', ts=None):
     fig.colorbar(pcm, ax=ax1)
     ax1.set_xlabel('x')
     ax1.set_ylabel('t')
-    ax1.set_title('Numerical Solution $u$')
+    ax1.set_title('Numerical sol. $u$')
 
     # 1D plot at t = max(times)
     ax2.plot(x, u[-1, :])
     ax2.set_xlabel('x')
     ax2.set_ylabel('$u(t_{max}, x)$')
-    ax2.set_title(f'Numerical Solution at t = {times[-1]:.2f}')
+    ax2.set_title(f'Numerical sol. at t = {times[-1]:.2f}')
 
     # Adjust layout and display the main plot
     plt.tight_layout()
@@ -354,7 +354,7 @@ def plot_numerical_solution(file_path='data/burgers_sin_ref.npz', ts=None):
         ax.plot(x, u[idx, :])
         ax.set_xlabel('x')
         ax.set_ylabel('$u(t, x)$')
-        ax.set_title(f'Numerical Solution at t = {t_val:.2f} (closest t = {times[idx]:.2f})')
+        ax.set_title(f'Numerical sol. at t = {t_val:.2f}')
         plt.tight_layout()
         plt.show()
 
@@ -459,7 +459,7 @@ def compute_errors_combined_u_theta(seq_model, u_ref=None, file_path='data/burge
     else:
         T = seq_model.total_t_max if T is None else T
         times = np.linspace(seq_model.total_t_min, T, M_x)
-        x = np.linspace(x_min, x_max, M_x)
+        x = np.linspace(seq_model.x_min, seq_model.x_max, M_x)
         u_num = np.array([u_ref(t, x) for t in times])  # Shape: (n_times, n_x)
 
     if T is None:
@@ -604,8 +604,8 @@ def plot_comparison_together(prob, u_ref=None, file_path='data/burgers_sin_ref.n
         u_nn_t = np.asarray(u_nn_values).squeeze()  # Shape: (n_x,)
 
         # Plot both on the same axes with same color
-        ax.plot(x, u_ref_t, linestyle='--', color=color, linewidth=2, marker=markers[i % len(markers)], markevery=30, label=f'Ref. solution t={t_val:.2f}')
-        ax.plot(x, u_nn_t, linestyle='-', color=color, linewidth=2, label=f'NN solution t={t_val:.2f}')
+        ax.plot(x, u_ref_t, linestyle='--', color=color, linewidth=2, marker=markers[i % len(markers)], markevery=30, label=f'Ref. sol. t={t_val:.2f}')
+        ax.plot(x, u_nn_t, linestyle='-', color=color, linewidth=2, label=f'NN sol. t={t_val:.2f}')
 
     # Set font sizes
     ax.tick_params(axis='both', which='major', labelsize=fontsize)
@@ -675,8 +675,8 @@ def plot_comparison_seperate(model, u_ref=None, file_path='data/burgers_sin_ref.
 
         # Plot both on the same axes
         ax = axs[i]
-        ax.plot(x, u_ref_t, label='Ref. solution', linestyle='--', linewidth=2)
-        ax.plot(x, u_nn_t, label='NN solution', linewidth=2)
+        ax.plot(x, u_ref_t, label='Ref. sol.', linestyle='--', linewidth=2)
+        ax.plot(x, u_nn_t, label='NN sol.', linewidth=2)
         ax.legend()
         ax.set_xlabel('x')
         ax.set_ylabel('u')
@@ -713,7 +713,7 @@ def plot_comparison_seperate_combined_u_theta(seq_model, u_ref=None, file_path='
         x = data['x']
         u_num = data['u']  # Shape: (n_times, n_x)
     else:
-        x = np.linspace(x_min, x_max, M_x)
+        x = np.linspace(seq_model.x_min, seq_model.x_max, M_x)
         times = np.array(ts)
         u_num = np.array([u_ref(t, x) for t in times])  # Shape: (len(ts), n_x)
 
@@ -749,8 +749,8 @@ def plot_comparison_seperate_combined_u_theta(seq_model, u_ref=None, file_path='
         u_nn_t = np.asarray(u_nn_values).squeeze()  # Shape: (n_x,)
 
         # Plot both on the same axes
-        ax.plot(x, u_ref_t, label='Ref. solution', linestyle='--', linewidth=2)
-        ax.plot(x, u_nn_t, label='NN solution', linewidth=2)
+        ax.plot(x, u_ref_t, label='Ref. sol.', linestyle='--', linewidth=2)
+        ax.plot(x, u_nn_t, label='NN sol.', linewidth=2)
         ax.legend()
         ax.set_xlabel('x')
         ax.set_ylabel('u')
