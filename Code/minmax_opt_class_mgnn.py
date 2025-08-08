@@ -27,7 +27,7 @@ def pytree_l2_norm(pytree):
 class MinMaxOptProb:
     def __init__(self, t_min=0, t_max=1, x_min=0, x_max=1, N_t=10, N_x=10, N_bc=128, N_ic=256, hidden_dims_list=[(64, 64, 64, 64)], seed=0, 
                  sigma=1, N_perturb=10000, k_h_rf_times=2, f_adaptive_weight=1000, f_opt_kh=1, u0=None, u1=None, u2=None, project="minmax_mgnn_burgers",
-                 lambda_ic=10.0, lambda_bc=10.0, lambda_eqn=1.0, gamma=0.0, alpha=0.9, N_test_gamma = 1000, adjust_gamma=True,
+                 lambda_ic=20.0, lambda_bc=10.0, lambda_eqn=1.0, gamma=0.0, alpha=0.9, N_test_gamma = 1000, adjust_gamma=True,
                  L1reg=1, sampling_method='uniform', notes='', lambda_tv=0.0, N_t_pnts=None, N_x_pnts=None, pre_epochs=1000,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  res=None, res_visc=None, use_loss_fn_elem_int=True, total_grade=1, k=0, use_a=True, M_t = 1000, M_x = 1000, f_plot=1000, plt_err_dist=False,
