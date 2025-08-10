@@ -613,7 +613,7 @@ def plot_comparison_together(prob, u_ref=None, file_path='data/burgers_sin_ref.n
     ax.set_ylabel('u', fontsize=fontsize)
     if title is not None:
         ax.set_title(title, fontsize=fontsize)
-    ax.legend(fontsize=12)
+    ax.legend(loc='upper right', fontsize=12)
 
     plt.tight_layout()
     plt.savefig(save_path, format='eps', bbox_inches='tight')
