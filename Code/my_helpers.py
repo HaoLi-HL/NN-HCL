@@ -510,8 +510,8 @@ def compute_errors_combined_u_theta(seq_model, u_ref=None, file_path='data/burge
     err_spacetime = spacetime_num / spacetime_den if spacetime_den != 0 else np.inf
 
     # Print the errors
-    print(f"Relative error at T: {err_T}")
-    print(f"Space-time relative error: {err_spacetime}")
+    print(f"Error at T: {num_T}, Relative error at T: {err_T}")
+    print(f"Space-time error: {spacetime_num}, Space-time relative error: {err_spacetime}")
 
     return err_T, err_spacetime
 
