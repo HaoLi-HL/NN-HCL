@@ -432,19 +432,6 @@ class MinMaxOptProb:
             opt_state = self.opt_state_list[grade_idx]
             self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params, self.key)
             print(f"The largest W^{{1,inf}} norm of k_h coeffs is {jnp.max(jnp.abs(self.pwp.coeffs[:,1:])):.6f}")
-            if self.plt_err_dist:
-                plot_u_theta_mesh(   
-                    model=self.model,
-                    M_t=self.M_t,
-                    M_x=self.M_x,
-                    t_min=self.t_min,
-                    t_max=self.t_max,
-                    x_min=self.x_min,
-                    x_max=self.x_max,
-                    upload_fig=self.set_wandb,
-                    pwp=self.pwp,
-                    vals=loss_each_elem,
-                    )
             if self.gamma > 0.0 and self.adjust_gamma:
                 self.gamma = self.determine_equation_weight(grade_idx, gamma_init=self.gamma)
                 print(f"Stage 1, Gamma: {self.gamma:.6f}")
