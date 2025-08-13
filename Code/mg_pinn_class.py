@@ -16,7 +16,7 @@ from NN_class import MLP
 from MGNN_class import MLP, MG_NN
 from my_helpers import plot_u_theta, plot_kh
 from functools import partial
-from Pwp_class import PiecewiseLinearPolynomials
+from PwpTri_class import PiecewiseLinearPolynomialsTri
 import wandb
 
 
@@ -31,7 +31,7 @@ class MinMaxOptProb:
                  t_min=0, t_max=1, x_min=0, x_max=1, k_h_rf_times=1, u0=None, u1=None, u2=None, lambda_bc_static=0.9, alpha_p_coeffs=0, 
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[5000, 5000, 5000], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=10000, decay_rate_stage2=1e-3,
                  f_adaptive=1000, nu=0.001, res_visc=None, res=None, use_loss_elem_int=True, total_grade=3, k=2):
-        self.pwp = PiecewiseLinearPolynomials(N_t, N_x, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, times=k_h_rf_times)
+        self.pwp = PiecewiseLinearPolynomialsTri(N_t, N_x, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, times=k_h_rf_times)
         self.lr_theta = lr_theta
         self.lb = jnp.array([t_min, x_min])
         self.ub = jnp.array([t_max, x_max])

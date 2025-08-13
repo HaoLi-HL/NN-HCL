@@ -9,7 +9,7 @@ from NN_class import MLP
 # import mesh2D as mesh2D
 
 
-class PiecewiseLinearPolynomials:
+class PiecewiseLinearPolynomialsTri:
     def __init__(self, N_t, N_x, t_min=0.0, t_max=1.0, x_min=0.0, x_max=1.0, times=1, bdry_times=1):
         """
         Initialize piecewise linear polynomials on a triangular mesh with custom ranges.
@@ -32,13 +32,13 @@ class PiecewiseLinearPolynomials:
         self.times = times
         self.bdry_times = bdry_times
         self.N_elements = 2 * N_t * N_x  # Two triangles per rectangle
-        self.triangles = self._generate_triangles()
+        self.partitions = self._generate_partitions()
         self.coeffs = jnp.zeros((self.N_elements, 3))  # Coefficients for each triangle
-        self.quad_points, self.quad_weights, self.element_indices, self.quad_points_tri, self.quad_weights_tri = self._setup_quadrature()
-        self.bdry_points_tri, self.bdry_weights_tri = self.get_boundary_quadrature()
+        self.quad_points, self.quad_weights, self.element_indices, self.quad_points_parti, self.quad_weights_parti = self._setup_quadrature()
+        self.bdry_points_parti, self.bdry_weights_parti = self.get_boundary_quadrature()
         self.normals = self.compute_normals()
 
-    def _generate_triangles(self):
+    def _generate_partitions(self):
         """Generate the original triangles for the mesh with custom ranges."""
         tau = (self.t_max - self.t_min) / self.N_t  # Step size along t
         hx = (self.x_max - self.x_min) / self.N_x   # Step size along x
@@ -88,7 +88,7 @@ class PiecewiseLinearPolynomials:
             return jnp.array(points), jnp.array(weights)
 
         # Vectorize the refinement and quadrature setup across all triangles
-        quad_points_tri, quad_weights_tri = vmap(refine_and_setup)(self.triangles)
+        quad_points_tri, quad_weights_tri = vmap(refine_and_setup)(self.partitions)
 
         # Flatten for global quadrature
         quad_points = quad_points_tri.reshape(-1, 2)
@@ -176,9 +176,9 @@ class PiecewiseLinearPolynomials:
         edge_quadrature_vmap = vmap(_edge_quadrature, in_axes=(0, 0))
 
         # Compute quadrature for each set of edges for all triangles
-        points1, weights1 = edge_quadrature_vmap(self.triangles[:, 0], self.triangles[:, 1])  # Edge 0-1
-        points2, weights2 = edge_quadrature_vmap(self.triangles[:, 1], self.triangles[:, 2])  # Edge 1-2
-        points3, weights3 = edge_quadrature_vmap(self.triangles[:, 2], self.triangles[:, 0])  # Edge 2-0
+        points1, weights1 = edge_quadrature_vmap(self.partitions[:, 0], self.partitions[:, 1])  # Edge 0-1
+        points2, weights2 = edge_quadrature_vmap(self.partitions[:, 1], self.partitions[:, 2])  # Edge 1-2
+        points3, weights3 = edge_quadrature_vmap(self.partitions[:, 2], self.partitions[:, 0])  # Edge 2-0
 
         # Concatenate points and weights for all three edges per triangle
         bdry_points_tri = jnp.concatenate([points1, points2, points3], axis=1)  # Shape: (N_elements, 3*(n+1), 2)
@@ -189,7 +189,7 @@ class PiecewiseLinearPolynomials:
     
     def compute_normals(self):
         """Compute outward unit normals for each edge of each triangle."""
-        triangles = self.triangles
+        triangles = self.partitions
         v0, v1, v2 = triangles[:, 0], triangles[:, 1], triangles[:, 2]
         # Edge 0-1
         tangent01 = v1 - v0

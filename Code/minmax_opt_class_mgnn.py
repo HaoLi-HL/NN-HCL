@@ -15,7 +15,8 @@ import optax.tree_utils as otu
 from MGNN_class import MLP, MG_NN
 from my_helpers import plot_u_theta, plot_kh, plot_u_theta_mesh
 from functools import partial
-from Pwp_class import PiecewiseLinearPolynomials
+from PwpTri_class import PiecewiseLinearPolynomialsTri
+from PwpRect_class import PiecewiseLinearPolynomialsRect
 import wandb
 
 # Utility function to compute L2 norm of a pytree
@@ -31,11 +32,14 @@ class MinMaxOptProb:
                  L1reg=1, sampling_method='uniform', notes='', lambda_tv=0.0, N_t_pnts=None, N_x_pnts=None, pre_epochs=1000,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  res=None, res_visc=None, use_loss_fn_elem_int=True, total_grade=1, k=0, use_a=True, M_t = 1000, M_x = 1000, f_plot=1000, plt_err_dist=False, plt_mesh=False,
+                 partition='tri',
                  seq_train=False, set_wandb=False):
         self.seq_train = seq_train  # Sequential training flag
         self.set_wandb = set_wandb
         # if self.seq_train is True, then we will not create a new wandb run but just use the existing one.
         # if self.seq_train is False and self.set_wandb is True, then we will create a new wandb run.
+
+        self.partition = partition  # 'tri' or 'rect'
         
         self.dt = (t_max - t_min) / N_t
         self.dx = (x_max - x_min) / N_x
@@ -45,7 +49,10 @@ class MinMaxOptProb:
         self.x_max = x_max
         self.M_t = M_t
         self.M_x = M_x
-        self.pwp = PiecewiseLinearPolynomials(N_t, N_x, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, times=k_h_rf_times)
+        if self.partition == 'tri':
+            self.pwp = PiecewiseLinearPolynomialsTri(N_t, N_x, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, times=k_h_rf_times)
+        elif self.partition == 'rect':
+            self.pwp = PiecewiseLinearPolynomialsRect(N_t, N_x, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, gauss_order=2**k_h_rf_times)
         self.lb = jnp.array([t_min, x_min])
         self.ub = jnp.array([t_max, x_max])
         self.h = (x_max - x_min)/N_x
@@ -127,7 +134,17 @@ class MinMaxOptProb:
         self.f_plot = f_plot
         self.plt_err_dist = plt_err_dist
         self.plt_mesh = plt_mesh
-
+        
+        if self.partition == 'tri':
+            self.elem_area = 0.5*(self.dt*self.dx)
+        elif self.partition == 'rect':
+            self.elem_area = self.dt*self.dx
+        else:
+            raise ValueError("Partition must be either 'tri' or 'rect'.")
+        if self.sampling_method == 'normal':
+            self.partition = 'tri'  # For normal sampling, we use triangular partitioning
+            print(f"Using triangular partitioning for normal sampling method.")
+        
         if not self.seq_train and self.set_wandb:
             wandb.init(project=self.project, name=self.run_name, notes=self.notes,
                        config={
@@ -170,20 +187,20 @@ class MinMaxOptProb:
 
     def maximize_kh_step(self, params, current_key):
         Nt = self.pwp.N_elements
-        # find proper kh by generating samples for each triangle
+        # find proper kh by generating samples for each triangle/rectangle
         key, current_key = jax.random.split(current_key)
         if self.sampling_method == 'normal':
-            vertices_all = self.pwp.triangles
+            vertices_all = self.pwp.partitions
             u_values_all = self.u_eval(params, vertices_all.reshape(-1, 2)).reshape(Nt, 3)
             A_all = jnp.stack([jnp.ones((Nt, 3)), vertices_all[:, :, 0], vertices_all[:, :, 1]], axis=-1)
             init_coeffs_all = jnp.linalg.solve(A_all, u_values_all[..., None]).squeeze(-1)
             perturbations_all = self.sigma * jax.random.normal(key, (self.N_perturb, 3))
         elif self.sampling_method == 'uniform':
             # avg_vals = jnp.average(u_values_all, axis=1)
-            quad_points = self.pwp.quad_points_tri
+            quad_points = self.pwp.quad_points_parti
             u_values_all = self.u_eval(params, quad_points)
-            quad_weights = self.pwp.quad_weights_tri
-            avg_vals = jnp.einsum('ij,ij->i', u_values_all, quad_weights)*2/(self.dt*self.dx)
+            quad_weights = self.pwp.quad_weights_parti
+            avg_vals = jnp.einsum('ij,ij->i', u_values_all, quad_weights)/self.elem_area
             init_coeffs_all = jnp.hstack([avg_vals[..., None] , jnp.zeros((Nt, 2))])
             perturbations_all = self.sigma * jax.random.uniform(key, (self.N_perturb, 3), minval=-1, maxval=1)
         
@@ -200,9 +217,9 @@ class MinMaxOptProb:
         # print(f"best_coeffs_all shape: {best_coeffs_all.shape}, perturbed_coeffs_all shape: {perturbed_coeffs_all.shape}")
         return best_coeffs_all, current_key, loss_eqn, loss_l1, loss_each_elem
 
-    def loss_fn_elem_int_per_elem(self, tri_idx, p_coeffs_all, params):
-        quad_points = self.pwp.quad_points_tri[tri_idx]
-        quad_weights = self.pwp.quad_weights_tri[tri_idx]
+    def loss_fn_elem_int_per_elem(self, parti_idx, p_coeffs_all, params):
+        quad_points = self.pwp.quad_points_parti[parti_idx]
+        quad_weights = self.pwp.quad_weights_parti[parti_idx]
         u_quad = self.u_eval(params, quad_points)
         grad_u_tx = self.grad_u(params, quad_points)
         u_t, u_x = grad_u_tx[:, 0], grad_u_tx[:, 1]
@@ -308,8 +325,8 @@ class MinMaxOptProb:
         interior_loss = jnp.dot(quad_weights, integrand_int)
 
         N_points_per_edge = 2**self.pwp.bdry_times + 1
-        points_per_edge = self.pwp.bdry_points_tri.reshape(self.pwp.N_elements, 3, N_points_per_edge, 2)
-        weights_per_edge = self.pwp.bdry_weights_tri.reshape(self.pwp.N_elements, 3, N_points_per_edge)
+        points_per_edge = self.pwp.bdry_points_parti.reshape(self.pwp.N_elements, 3, N_points_per_edge, 2)
+        weights_per_edge = self.pwp.bdry_weights_parti.reshape(self.pwp.N_elements, 3, N_points_per_edge)
         normals_per_edge = self.pwp.normals
 
         def compute_edge_integral(points, weights, normal, p_coeffs_K, params):
@@ -325,12 +342,12 @@ class MinMaxOptProb:
             integrand = flux_diff * sgn
             return jnp.sum(weights * integrand)
 
-        def compute_triangle_boundary_loss(points_tri, weights_tri, normals_tri, p_coeffs_K, params):
+        def compute_partition_boundary_loss(points_parti, weights_parti, normals_parti, p_coeffs_K, params):
             edge_losses = vmap(compute_edge_integral, in_axes=(0, 0, 0, None, None))(
-                points_tri, weights_tri, normals_tri, p_coeffs_K, params)
+                points_parti, weights_parti, normals_parti, p_coeffs_K, params)
             return jnp.sum(edge_losses)
 
-        boundary_loss = jnp.sum(vmap(compute_triangle_boundary_loss, in_axes=(0, 0, 0, 0, None))(
+        boundary_loss = jnp.sum(vmap(compute_partition_boundary_loss, in_axes=(0, 0, 0, 0, None))(
                                 points_per_edge, weights_per_edge, normals_per_edge, p_coeffs, params))
         total_loss = interior_loss + boundary_loss
         return total_loss

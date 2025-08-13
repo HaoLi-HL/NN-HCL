@@ -22,6 +22,7 @@ class SeqMinMaxOptProb:
                  L1reg=0, sampling_method='uniform', notes='', lambda_tv=1.0, N_t_pnts=None, N_x_pnts=None, pre_epochs=1000,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  res=None, res_visc=None, use_loss_fn_elem_int=True, total_grade=1, k=0, use_a=True, f_plot=1000, plt_err_dist=False, plt_mesh=False,
+                 partition='tri',
                  M_t=1000, M_x=2000, set_wandb=False):
         """
         Initialize the sequential training class.
@@ -35,6 +36,7 @@ class SeqMinMaxOptProb:
             ... (other parameters passed to MinMaxOptProb)
         """
         self.set_wandb = set_wandb
+        self.partition = partition
         
         self.total_t_min = total_t_min
         self.total_t_max = total_t_max
@@ -160,7 +162,7 @@ class SeqMinMaxOptProb:
                 init_lr_stage2=self.init_lr_stage2, epoch_stage2=epoch_stage2, decay_rate_stage2=self.decay_rate_stage2,
                 f_adaptive_weight=self.f_adaptive_weight, f_opt_kh=self.f_opt_kh, res=self.res, res_visc=self.res_visc, 
                 use_loss_fn_elem_int=self.use_loss_fn_elem_int, total_grade=self.total_grade, k=self.k, use_a=self.use_a, 
-                f_plot=self.f_plot, plt_err_dist=self.plt_err_dist, plt_mesh=self.plt_mesh, M_t=self.M_t, M_x=self.M_x,
+                f_plot=self.f_plot, plt_err_dist=self.plt_err_dist, plt_mesh=self.plt_mesh, partition=self.partition, M_t=self.M_t, M_x=self.M_x,
                 seq_train=True, set_wandb=self.set_wandb,
             )
              # Store the segment and update previous_params with the trained parameters

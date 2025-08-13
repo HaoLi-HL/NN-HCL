@@ -8,6 +8,8 @@ import wandb
 from os.path import splitext
 import matplotlib.gridspec as gridspec
 from matplotlib import cm
+from PwpTri_class import PiecewiseLinearPolynomialsTri
+from PwpRect_class import PiecewiseLinearPolynomialsRect
 
 
 def plot_loss_history(loss_int, loss_bc, title):
@@ -764,7 +766,7 @@ def plot_comparison_seperate_combined_u_theta(seq_model, u_ref=None, file_path='
 def plot_u_theta_mesh(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=0.5, x_min=-1.0, x_max=1.0, ts=None, upload_fig=False, pwp=None, vals=None):
     """
     Plot the neural network function u_theta over a specified domain [t_min, t_max] x [x_min, x_max].
-    Optionally overlay the triangular mesh from PiecewiseLinearPolynomials and denote vals on the triangles.
+    Optionally overlay the mesh from PiecewiseLinearPolynomials and denote vals on the meshes.
     The 1D plot at t = t_max is removed, and only the 2D plot is shown.
 
     Args:
@@ -778,8 +780,8 @@ def plot_u_theta_mesh(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=0
         x_max: Maximum value for x (default: 1.0).
         ts: List or array of timestamps for which to plot individual 1D snapshots (default: None).
         upload_fig: Whether to upload the figure to wandb (default: False).
-        pwp: Instance of PiecewiseLinearPolynomials to plot the mesh (default: None).
-        vals: Values to denote on each triangle (default: None).
+        pwp: Instance of PiecewiseLinearPolynomials(Tri/Rect) to plot the mesh (default: None).
+        vals: Values to denote on each mesh (default: None).
     """
     if ts is None:
         ts = []
@@ -813,15 +815,25 @@ def plot_u_theta_mesh(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=0
 
     # Overlay the mesh and denote vals if pwp and vals are provided
     if pwp is not None:
-        triangles = pwp.triangles
-        for idx, tri in enumerate(triangles):
-            # Plot the three edges of the triangle
-            ax1.plot([tri[0][1], tri[1][1]], [tri[0][0], tri[1][0]], color='black', alpha=0.5, linewidth=0.5)
-            ax1.plot([tri[1][1], tri[2][1]], [tri[1][0], tri[2][0]], color='black', alpha=0.5, linewidth=0.5)
-            ax1.plot([tri[2][1], tri[0][1]], [tri[2][0], tri[0][0]], color='black', alpha=0.5, linewidth=0.5)
-            
-            # Compute the center of the triangle
-            center = np.mean(tri, axis=0)
+        if isinstance(pwp, PiecewiseLinearPolynomialsTri):
+            triangles = pwp.partitions
+            for idx, tri in enumerate(triangles):
+                # Plot the three edges of the triangle
+                ax1.plot([tri[0][1], tri[1][1]], [tri[0][0], tri[1][0]], color='black', alpha=0.5, linewidth=0.5)
+                ax1.plot([tri[1][1], tri[2][1]], [tri[1][0], tri[2][0]], color='black', alpha=0.5, linewidth=0.5)
+                ax1.plot([tri[2][1], tri[0][1]], [tri[2][0], tri[0][0]], color='black', alpha=0.5, linewidth=0.5)
+                center = np.mean(tri, axis=0)
+        elif isinstance(pwp, PiecewiseLinearPolynomialsRect):
+            rectangles = pwp.partitions
+            for idx, rect in enumerate(rectangles):
+                # Plot the four edges of the rectangle
+                ax1.plot([rect[0][1], rect[3][1]], [rect[0][0], rect[3][0]], color='black', alpha=0.5, linewidth=0.5)  # Bottom
+                ax1.plot([rect[0][1], rect[1][1]], [rect[0][0], rect[1][0]], color='black', alpha=0.5, linewidth=0.5)  # Left
+                ax1.plot([rect[1][1], rect[2][1]], [rect[1][0], rect[2][0]], color='black', alpha=0.5, linewidth=0.5)  # Top
+                ax1.plot([rect[3][1], rect[2][1]], [rect[3][0], rect[2][0]], color='black', alpha=0.5, linewidth=0.5)  # Right
+                center = np.mean(rect, axis=0)
+
+
             if vals is not None:
                 # Denote avg_val at the center
                 ax1.text(center[1], center[0], f'{vals[idx]:.2f}', fontsize=6, color='black', ha='center', va='center')
