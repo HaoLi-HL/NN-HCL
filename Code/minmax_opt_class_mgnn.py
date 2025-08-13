@@ -30,7 +30,7 @@ class MinMaxOptProb:
                  lambda_ic=20.0, lambda_bc=10.0, lambda_eqn=1.0, gamma=0.0, alpha=0.9, N_test_gamma = 1000, adjust_gamma=True,
                  L1reg=1, sampling_method='uniform', notes='', lambda_tv=0.0, N_t_pnts=None, N_x_pnts=None, pre_epochs=1000,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
-                 res=None, res_visc=None, use_loss_fn_elem_int=True, total_grade=1, k=0, use_a=True, M_t = 1000, M_x = 1000, f_plot=1000, plt_err_dist=False,
+                 res=None, res_visc=None, use_loss_fn_elem_int=True, total_grade=1, k=0, use_a=True, M_t = 1000, M_x = 1000, f_plot=1000, plt_err_dist=False, plt_mesh=False,
                  seq_train=False, set_wandb=False):
         self.seq_train = seq_train  # Sequential training flag
         self.set_wandb = set_wandb
@@ -126,6 +126,7 @@ class MinMaxOptProb:
 
         self.f_plot = f_plot
         self.plt_err_dist = plt_err_dist
+        self.plt_mesh = plt_mesh
 
         if not self.seq_train and self.set_wandb:
             wandb.init(project=self.project, name=self.run_name, notes=self.notes,
@@ -471,7 +472,7 @@ class MinMaxOptProb:
                         x_max=self.x_max,
                         upload_fig=self.set_wandb
                         )
-                    if self.plt_err_dist:
+                    if self.plt_err_dist or self.plt_mesh:
                         plot_u_theta_mesh(   
                             model=self.model,
                             M_t=self.M_t,
@@ -482,7 +483,7 @@ class MinMaxOptProb:
                             x_max=self.x_max,
                             upload_fig=self.set_wandb,
                             pwp=self.pwp,
-                            vals=loss_each_elem,
+                            vals=loss_each_elem if self.plt_err_dist else None,
                             )
                 self.model.mlps[grade_idx].params = params
                 self.opt_state_list[grade_idx] = opt_state
