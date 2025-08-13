@@ -812,7 +812,7 @@ def plot_u_theta_mesh(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=0
     ax1.set_title('Neural Network Function $u_\\theta$')
 
     # Overlay the mesh and denote vals if pwp and vals are provided
-    if pwp is not None and vals is not None:
+    if pwp is not None:
         triangles = pwp.triangles
         for idx, tri in enumerate(triangles):
             # Plot the three edges of the triangle
@@ -822,9 +822,9 @@ def plot_u_theta_mesh(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=0
             
             # Compute the center of the triangle
             center = np.mean(tri, axis=0)
-            
-            # Denote avg_val at the center
-            ax1.text(center[1], center[0], f'{vals[idx]:.2f}', fontsize=6, color='black', ha='center', va='center')
+            if vals is not None:
+                # Denote avg_val at the center
+                ax1.text(center[1], center[0], f'{vals[idx]:.2f}', fontsize=6, color='black', ha='center', va='center')
 
     # Adjust layout and display the main plot
     plt.tight_layout()
