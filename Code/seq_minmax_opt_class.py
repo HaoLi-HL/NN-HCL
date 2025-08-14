@@ -19,9 +19,9 @@ class SeqMinMaxOptProb:
     def __init__(self, num_segments=1, total_t_min=0, total_t_max=1, x_min=0, x_max=1, seq_T=None, N_t=10, N_x=10, N_bc=2048, N_ic=4096, hidden_dims_list=[(64, 64, 64, 64)], seed=0, 
                  sigma=0.1, N_perturb=10000, k_h_rf_times=2, f_adaptive_weight=1000, f_opt_kh=1, u0=None, u1=None, u2=None, project="seq_minmax_burgers",
                  lambda_ic=10.0, lambda_bc=10.0, lambda_eqn=1.0, alpha=0.9, gamma=0.0, N_test_gamma=1000, adjust_gamma=True,
-                 L1reg=0, sampling_method='uniform', notes='', lambda_tv=1.0, N_t_pnts=None, N_x_pnts=None, pre_epochs=1000,
+                 L1reg=0, sampling_method='uniform', notes='', pre_epochs=1000,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
-                 res=None, res_visc=None, use_loss_fn_elem_int=True, total_grade=1, k=0, use_a=True, f_plot=1000, plt_err_dist=False, plt_mesh=False,
+                 res=None, res_visc=None, use_loss_fn_elem_int=True,  k=0, use_a=True, f_plot=1000, plt_err_dist=False, plt_mesh=False,
                  partition='tri',
                  M_t=1000, M_x=2000, set_wandb=False):
         """
@@ -69,9 +69,6 @@ class SeqMinMaxOptProb:
         self.L1reg = L1reg
         self.sampling_method = sampling_method
         self.notes = notes
-        self.lambda_tv = lambda_tv
-        self.N_t_pnts = N_t_pnts
-        self.N_x_pnts = N_x_pnts
         self.pre_epochs = pre_epochs
         self.init_lrs = init_lrs
         self.grade_epochs = grade_epochs
@@ -84,7 +81,6 @@ class SeqMinMaxOptProb:
         self.res = res
         self.res_visc = res_visc
         self.use_loss_fn_elem_int = use_loss_fn_elem_int
-        self.total_grade = total_grade
         self.k = k
         self.use_a = use_a
         self.M_t = M_t
@@ -92,7 +88,7 @@ class SeqMinMaxOptProb:
         self.f_plot = f_plot
         self.plt_err_dist = plt_err_dist
         self.plt_mesh = plt_mesh
-        self.run_name = f"({total_t_max:.1f}-{total_t_min:.1f})/{num_segments}_Nt{N_t}_Nx{N_x}_lrs{init_lrs[0]}_eps{grade_epochs[0]}_L1reg{L1reg}_sig{sigma}_gam{gamma}_Np{N_perturb}_TV{lambda_tv}_sd{seed}"
+        self.run_name = f"({total_t_max:.1f}-{total_t_min:.1f})/{num_segments}_Nt{N_t}_Nx{N_x}_lrs{init_lrs[0]}_eps{grade_epochs[0]}_L1reg{L1reg}_sig{sigma}_gam{gamma}_Np{N_perturb}_sd{seed}"
         self.project = project
         if self.set_wandb:
             wandb.init(project=self.project, 
@@ -119,9 +115,6 @@ class SeqMinMaxOptProb:
                                "adjust_gamma": adjust_gamma,
                                "L1reg": L1reg,
                                "sampling_method": sampling_method,
-                               "lambda_tv": lambda_tv,
-                               "N_t_pnts": N_t_pnts,
-                               "N_x_pnts": N_x_pnts
                               })
 
     def train_seq(self, grade_epochs=None, epoch_stage2=None, save_model=True):
@@ -156,12 +149,11 @@ class SeqMinMaxOptProb:
                 sigma=self.sigma, N_perturb=self.N_perturb, k_h_rf_times=self.k_h_rf_times, u0=current_u0, u1=self.u1, u2=self.u2, project=self.project,
                 gamma=self.gamma, alpha=self.alpha, N_test_gamma=self.N_test_gamma, adjust_gamma=self.adjust_gamma, 
                 lambda_ic=self.lambda_ic, lambda_bc=self.lambda_bc, lambda_eqn=self.lambda_eqn,
-                L1reg=self.L1reg, sampling_method=self.sampling_method, notes=self.notes, 
-                lambda_tv=self.lambda_tv, N_t_pnts=self.N_t_pnts, N_x_pnts=self.N_x_pnts, pre_epochs=self.pre_epochs,
+                L1reg=self.L1reg, sampling_method=self.sampling_method, notes=self.notes, pre_epochs=self.pre_epochs,
                 init_lrs=self.init_lrs, grade_epochs=grade_epochs, decay_rates=self.decay_rates, 
                 init_lr_stage2=self.init_lr_stage2, epoch_stage2=epoch_stage2, decay_rate_stage2=self.decay_rate_stage2,
                 f_adaptive_weight=self.f_adaptive_weight, f_opt_kh=self.f_opt_kh, res=self.res, res_visc=self.res_visc, 
-                use_loss_fn_elem_int=self.use_loss_fn_elem_int, total_grade=self.total_grade, k=self.k, use_a=self.use_a, 
+                use_loss_fn_elem_int=self.use_loss_fn_elem_int, k=self.k, use_a=self.use_a, 
                 f_plot=self.f_plot, plt_err_dist=self.plt_err_dist, plt_mesh=self.plt_mesh, partition=self.partition, M_t=self.M_t, M_x=self.M_x,
                 seq_train=True, set_wandb=self.set_wandb,
             )
@@ -245,9 +237,6 @@ def save_seq_model(seq_obj, model_path_prefix):
             'adjust_gamma': seq_obj.adjust_gamma,
             'L1reg': seq_obj.L1reg,
             'sampling_method': seq_obj.sampling_method,
-            'lambda_tv': seq_obj.lambda_tv,
-            'N_t_pnts': seq_obj.N_t_pnts,
-            'N_x_pnts': seq_obj.N_x_pnts,
             'set_wandb': seq_obj.set_wandb
         }
     }

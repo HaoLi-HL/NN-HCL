@@ -27,16 +27,23 @@ def pytree_l2_norm(pytree):
 
 # Optimizer Class
 class MinMaxOptProb:
-    def __init__(self, N_t=10, N_x=10, lr_theta=0.01, hidden_dims_list=[(64, 64), (32, 32), (16, 16)], seed=0, sigma=0.1, N_perturb=5000, N_bc=100, N_ic=100,
-                 t_min=0, t_max=1, x_min=0, x_max=1, k_h_rf_times=1, u0=None, u1=None, u2=None, lambda_bc_static=0.9, alpha_p_coeffs=0, 
+    def __init__(self, input_dim=2, N_t=10, N_x=10, lr_theta=0.01, hidden_dims_list=[(64, 64), (32, 32), (16, 16)], seed=0, sigma=0.1, N_perturb=5000, N_bc=100, N_ic=100,
+                 t_min=0, t_max=1, x_min=0, x_max=1, y_min=0, y_max=1, k_h_rf_times=1, u0=None, u1=None, u2=None, lambda_bc_static=0.9, alpha_p_coeffs=0, 
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[5000, 5000, 5000], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=10000, decay_rate_stage2=1e-3,
                  f_adaptive=1000, nu=0.001, res_visc=None, res=None, use_loss_elem_int=True, total_grade=3, k=2):
+        self.input_dim = input_dim
+        
         self.pwp = PiecewiseLinearPolynomialsTri(N_t, N_x, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, times=k_h_rf_times)
         self.lr_theta = lr_theta
-        self.lb = jnp.array([t_min, x_min])
-        self.ub = jnp.array([t_max, x_max])
-        self.h = (x_max - x_min)/N_x
-        self.model = MG_NN(input_dim=2, hidden_dims_list=hidden_dims_list, activation=nn.tanh, lb=self.lb, ub=self.ub, seed=seed)
+        if self.input_dim == 2:
+            self.lb = jnp.array([t_min, x_min])
+            self.ub = jnp.array([t_max, x_max])
+        elif self.input_dim == 3:
+            self.lb = jnp.array([t_min, x_min, y_min])
+            self.ub = jnp.array([t_max, x_max, y_max])
+
+        self.hx = (x_max - x_min)/N_x
+        self.model = MG_NN(input_dim=self.input_dim, hidden_dims_list=hidden_dims_list, activation=nn.tanh, lb=self.lb, ub=self.ub, seed=seed)
         self.total_grade = total_grade  # Number of grades for MGDL
         self.k = k  # Number of grades to refine in second stage
 
@@ -142,11 +149,11 @@ class MinMaxOptProb:
         u_t, u_x = grad_u_tx[:, 0], grad_u_tx[:, 1]
         hessian_u_tx = self.hessian_u(quad_points)
         u_xx = hessian_u_tx[:, 1, 1].flatten()
-        residual_visc = self.res_visc(u_quad, u_t, u_x, u_xx, self.h**2)
+        residual_visc = self.res_visc(u_quad, u_t, u_x, u_xx, self.hx**2)
         residual = self.res(u_quad, u_t, u_x).flatten()
         p_coeffs_quad = p_coeffs[self.pwp.element_indices]
         k_h_quad = p_coeffs_quad[:, 0] + p_coeffs_quad[:, 1] * quad_points[:, 0] + p_coeffs_quad[:, 2] * quad_points[:, 1]
-        integrand = residual * jnp.sign(u_quad - k_h_quad) + jnp.abs(self.h*residual_visc)
+        integrand = residual * jnp.sign(u_quad - k_h_quad) + jnp.abs(self.hx*residual_visc)
         interior_loss = jnp.dot(quad_weights, integrand)
         return interior_loss
     

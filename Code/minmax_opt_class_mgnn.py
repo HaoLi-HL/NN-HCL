@@ -17,6 +17,7 @@ from my_helpers import plot_u_theta, plot_kh, plot_u_theta_mesh
 from functools import partial
 from PwpTri_class import PiecewiseLinearPolynomialsTri
 from PwpRect_class import PiecewiseLinearPolynomialsRect
+from PwpHex_class import PiecewiseLinearPolynomialsHex
 import wandb
 
 # Utility function to compute L2 norm of a pytree
@@ -26,14 +27,23 @@ def pytree_l2_norm(pytree):
 
 # Optimizer Class
 class MinMaxOptProb:
-    def __init__(self, t_min=0, t_max=1, x_min=0, x_max=1, N_t=10, N_x=10, N_bc=128, N_ic=256, hidden_dims_list=[(64, 64, 64, 64)], seed=0, 
+    def __init__(self, input_dim=2, t_min=0, t_max=1, x_min=0, x_max=1, y_min=0, y_max=1, N_t=10, N_x=10, N_y=10, N_bc=128, N_ic=256, hidden_dims_list=[(64, 64, 64, 64)], seed=0, 
                  sigma=1, N_perturb=10000, k_h_rf_times=2, f_adaptive_weight=1000, f_opt_kh=1, u0=None, u1=None, u2=None, project="minmax_mgnn_burgers",
                  lambda_ic=20.0, lambda_bc=10.0, lambda_eqn=1.0, gamma=0.0, alpha=0.9, N_test_gamma = 1000, adjust_gamma=True,
-                 L1reg=1, sampling_method='uniform', notes='', lambda_tv=0.0, N_t_pnts=None, N_x_pnts=None, pre_epochs=1000,
+                 L1reg=1, sampling_method='uniform', notes='', pre_epochs=1000,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
-                 res=None, res_visc=None, use_loss_fn_elem_int=True, total_grade=1, k=0, use_a=True, M_t = 1000, M_x = 1000, f_plot=1000, plt_err_dist=False, plt_mesh=False,
+                 res=None, res_visc=None, use_loss_fn_elem_int=True, k=0, use_a=True, M_t = 1000, M_x = 1000, f_plot=1000, plt_err_dist=False, plt_mesh=False,
                  partition='tri',
                  seq_train=False, set_wandb=False):
+        self.input_dim = input_dim
+        if self.input_dim == 2:
+            self.lb = jnp.array([t_min, x_min])
+            self.ub = jnp.array([t_max, x_max])
+        elif self.input_dim == 3:
+            self.lb = jnp.array([t_min, x_min, y_min])
+            self.ub = jnp.array([t_max, x_max, y_max])
+
+
         self.seq_train = seq_train  # Sequential training flag
         self.set_wandb = set_wandb
         # if self.seq_train is True, then we will not create a new wandb run but just use the existing one.
@@ -41,23 +51,32 @@ class MinMaxOptProb:
 
         self.partition = partition  # 'tri' or 'rect'
         
-        self.dt = (t_max - t_min) / N_t
-        self.dx = (x_max - x_min) / N_x
+        self.ht = (t_max - t_min) / N_t
+        self.hx = (x_max - x_min) / N_x
         self.t_min = t_min
         self.t_max = t_max
         self.x_min = x_min
         self.x_max = x_max
         self.M_t = M_t
         self.M_x = M_x
+        if self.input_dim == 3:
+            self.y_min = y_min
+            self.y_max = y_max
+            self.hy = (y_max - y_min) / N_y
+            self.M_y = M_x  # Assuming M_y is the same as M_x for simplicity
+
         if self.partition == 'tri':
             self.pwp = PiecewiseLinearPolynomialsTri(N_t, N_x, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, times=k_h_rf_times)
         elif self.partition == 'rect':
             self.pwp = PiecewiseLinearPolynomialsRect(N_t, N_x, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, gauss_order=2**k_h_rf_times)
-        self.lb = jnp.array([t_min, x_min])
-        self.ub = jnp.array([t_max, x_max])
-        self.h = (x_max - x_min)/N_x
+        elif self.partition == 'hex' or self.input_dim == 3:
+            self.pwp = PiecewiseLinearPolynomialsHex(N_t, N_x, N_y, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, y_min=y_min, y_max=y_max, gauss_order=2**k_h_rf_times)
+        else:
+            raise ValueError("Partition must be either 'tri', 'rect', or 'hex' for 3D.")
+
+        
         self.use_a = use_a  # Whether to use the adaptive parameter a in MLP
-        self.model = MG_NN(input_dim=2, hidden_dims_list=hidden_dims_list, activation=nn.tanh, lb=self.lb, ub=self.ub, seed=seed, use_a=self.use_a)
+        self.model = MG_NN(input_dim=self.input_dim, hidden_dims_list=hidden_dims_list, activation=nn.tanh, lb=self.lb, ub=self.ub, seed=seed, use_a=self.use_a)
         self.total_grade = len(hidden_dims_list)  # Number of grades for MGDL
         self.k = k  # Number of grades to refine in second stage
         self.key = jax.random.PRNGKey(seed)
@@ -81,11 +100,7 @@ class MinMaxOptProb:
         self.alpha = alpha
         self.res_visc = res_visc
         self.res = res
-        self.lambda_tv = lambda_tv
-        self.N_t_pnts = 10*N_t if N_t_pnts is None else N_t_pnts
-        self.N_x_pnts = 10*N_x if N_x_pnts is None else N_x_pnts
-        self.t_points = jnp.linspace(self.pwp.t_min, self.pwp.t_max, self.N_t_pnts)
-        self.x_points = jnp.linspace(self.pwp.x_min, self.pwp.x_max, self.N_x_pnts)
+
         self.pre_epochs = pre_epochs
         self.gen_ibc()
         if use_loss_fn_elem_int:
@@ -136,9 +151,9 @@ class MinMaxOptProb:
         self.plt_mesh = plt_mesh
         
         if self.partition == 'tri':
-            self.elem_area = 0.5*(self.dt*self.dx)
+            self.elem_area = 0.5*(self.ht*self.hx)
         elif self.partition == 'rect':
-            self.elem_area = self.dt*self.dx
+            self.elem_area = self.ht*self.hx
         else:
             raise ValueError("Partition must be either 'tri' or 'rect'.")
         if self.sampling_method == 'normal':
@@ -235,49 +250,6 @@ class MinMaxOptProb:
         loss_l1 = jnp.abs(residual)@quad_weights
         return loss, loss_l1
     
-    def compute_tv_loss(self, params):
-        """Compute the Total Variation Diminishing (TVD) loss."""
-        # Define time points for TV calculation
-        t_points = self.t_points
-        x_points = self.x_points
-        # Create grid for evaluation at consecutive time steps
-        tx_n = jnp.stack(jnp.meshgrid(t_points[:-1], x_points), axis=-1).reshape(-1, 2)
-        tx_n_plus_1 = jnp.stack(jnp.meshgrid(t_points[1:], x_points), axis=-1).reshape(-1, 2)
-        # Evaluate solution at t_n and t_{n+1}
-        u_n = self.u_eval(params, tx_n).reshape(self.N_t_pnts - 1, self.N_x_pnts)
-        u_n_plus_1 = self.u_eval(params, tx_n_plus_1).reshape(self.N_t_pnts - 1, self.N_x_pnts)
-        # Compute TV_h for each time step
-        tv_n = jnp.sum(jnp.abs(u_n[:, 1:] - u_n[:, :-1]), axis=1)
-        tv_n_plus_1 = jnp.sum(jnp.abs(u_n_plus_1[:, 1:] - u_n_plus_1[:, :-1]), axis=1)
-        # Compute TVD loss: sum of squared differences where TV increases
-        tv_diff = tv_n_plus_1 - tv_n
-        tvd_loss = jnp.sum(jnp.maximum(0, tv_diff)**2)
-        return tvd_loss
-    
-    # Modified function to compute TV loss with a more efficient approach
-    def modified_compute_tv_loss(self, params):
-        t_points = self.t_points
-        x_points = self.x_points
-
-        def compute_tv(t, params):
-            tx = jnp.stack([t * jnp.ones(self.N_x_pnts), x_points], axis=-1)
-            u = self.u_eval(params, tx)
-            tv = jnp.sum(jnp.abs(u[1:] - u[:-1]))
-            return tv
-
-        def body(carry, n):
-            tv_prev, loss = carry
-            tv_curr = compute_tv(t_points[n+1], params)
-            diff = tv_curr - tv_prev
-            loss += jnp.maximum(0, diff)**2
-            return (tv_curr, loss), None
-
-        initial_tv = compute_tv(t_points[0], params)
-        initial_carry = (initial_tv, 0.0)
-        carry, _ = jax.lax.scan(body, initial_carry, jnp.arange(self.N_t_pnts - 1))
-        tvd_loss = carry[1]
-        return tvd_loss
-    
 
     def loss_fn_elem_int(self, params):
         quad_points = self.pwp.quad_points
@@ -291,16 +263,10 @@ class MinMaxOptProb:
         integrand = residual * jnp.sign(u_quad - k_h_quad)
 
         if self.L1reg > 0:
-            integrand += self.L1reg * jnp.abs(self.h * residual)
+            integrand += self.L1reg * jnp.abs(self.hx * residual)
             
         interior_loss = jnp.dot(quad_weights, integrand)
-
-        # Add TV penalty term
-        if self.lambda_tv > 0:
-            tv_loss = self.compute_tv_loss(params)
-            total_loss = interior_loss + self.lambda_tv * self.h * tv_loss
-        else:
-            total_loss = interior_loss
+        total_loss = interior_loss
         return total_loss
     
     def loss_fn_elem_bdry(self, params, p_coeffs):

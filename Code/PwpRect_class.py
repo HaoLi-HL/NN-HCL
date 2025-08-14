@@ -19,7 +19,7 @@ class PiecewiseLinearPolynomialsRect:
             N_x: Number of divisions along the x-axis.
             t_min: Minimum value for t (default: 0.0).
             t_max: Maximum value for t (default: 1.0).
-            x_min: Minimum value for x (default: 0.0).
+            x_min: Minimum value for x (default: -1.0).
             x_max: Maximum value for x (default: 1.0).
             gauss_order: Order of Gauss quadrature (number of points per direction, default: 2).
             bdry_order: Order of boundary quadrature (number of points per edge, default: 3).

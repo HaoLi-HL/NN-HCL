@@ -833,7 +833,6 @@ def plot_u_theta_mesh(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=0
                 ax1.plot([rect[3][1], rect[2][1]], [rect[3][0], rect[2][0]], color='black', alpha=0.5, linewidth=0.5)  # Right
                 center = np.mean(rect, axis=0)
 
-
             if vals is not None:
                 # Denote avg_val at the center
                 ax1.text(center[1], center[0], f'{vals[idx]:.2f}', fontsize=6, color='black', ha='center', va='center')
