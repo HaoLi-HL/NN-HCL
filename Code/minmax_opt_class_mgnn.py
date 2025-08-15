@@ -28,7 +28,7 @@ def pytree_l2_norm(pytree):
 # Optimizer Class
 class MinMaxOptProb:
     def __init__(self, input_dim=2, t_min=0, t_max=1, x_min=0, x_max=1, y_min=0, y_max=1, N_t=10, N_x=10, N_y=10, N_bc=128, N_ic=256, hidden_dims_list=[(64, 64, 64, 64)], seed=0, 
-                 sigma=1, N_perturb=10000, k_h_rf_times=2, f_adaptive_weight=1000, f_opt_kh=1, u0=None, u1=None, u2=None, project="minmax_mgnn_burgers",
+                 sigma=1, N_perturb=10000, k_h_rf_times=2, f_adaptive_weight=1000, f_opt_kh=1, u0=None, u1=None, u2=None, u3=None, u4=None, project="minmax_mgnn_burgers",
                  lambda_ic=20.0, lambda_bc=10.0, lambda_eqn=1.0, gamma=0.0, alpha=0.9, N_test_gamma = 1000, adjust_gamma=True,
                  L1reg=1, sampling_method='uniform', notes='', pre_epochs=1000,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
@@ -36,6 +36,7 @@ class MinMaxOptProb:
                  partition='tri',
                  seq_train=False, set_wandb=False):
         self.input_dim = input_dim
+        self.p_dof = self.input_dim + 1
         if self.input_dim == 2:
             self.lb = jnp.array([t_min, x_min])
             self.ub = jnp.array([t_max, x_max])
@@ -59,11 +60,6 @@ class MinMaxOptProb:
         self.x_max = x_max
         self.M_t = M_t
         self.M_x = M_x
-        if self.input_dim == 3:
-            self.y_min = y_min
-            self.y_max = y_max
-            self.hy = (y_max - y_min) / N_y
-            self.M_y = M_x  # Assuming M_y is the same as M_x for simplicity
 
         if self.partition == 'tri':
             self.pwp = PiecewiseLinearPolynomialsTri(N_t, N_x, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, times=k_h_rf_times)
@@ -89,6 +85,17 @@ class MinMaxOptProb:
         self.u0 = u0
         self.u1 = u1
         self.u2 = u2
+
+        if self.input_dim == 3:
+            self.y_min = y_min
+            self.y_max = y_max
+            self.hy = (y_max - y_min) / N_y
+            self.M_y = M_x  # Assuming M_y is the same as M_x for simplicity
+            self.u3 = u3
+            self.u4 = u4
+            self.y_bc = jnp.linspace(y_min, y_max, self.N_ic)
+
+
         self.lambda_ic = lambda_ic
         self.lambda_bc = lambda_bc
         self.lambda_eqn = lambda_eqn
@@ -185,11 +192,11 @@ class MinMaxOptProb:
 
     def gen_ibc(self):
         self.u_t0 = self.u0(self.x_bc)
-        self.tx_t0 = jnp.stack([self.pwp.t_min * jnp.ones_like(self.x_bc), self.x_bc], axis=1)
+        self.tx_t0 = jnp.stack([self.t_min * jnp.ones_like(self.x_bc), self.x_bc], axis=1)
         self.u_x0 = self.u1(self.t_bc)
-        self.tx_x0 = jnp.stack([self.t_bc, self.pwp.x_min * jnp.ones_like(self.t_bc)], axis=1)
+        self.tx_x0 = jnp.stack([self.t_bc, self.x_min * jnp.ones_like(self.t_bc)], axis=1)
         self.u_x1 = self.u2(self.t_bc)
-        self.tx_x1 = jnp.stack([self.t_bc, self.pwp.x_max * jnp.ones_like(self.t_bc)], axis=1)
+        self.tx_x1 = jnp.stack([self.t_bc, self.x_max * jnp.ones_like(self.t_bc)], axis=1)
         
     def gen_funcs(self, grade_idx=None):
         if grade_idx is None:
@@ -216,8 +223,8 @@ class MinMaxOptProb:
             u_values_all = self.u_eval(params, quad_points)
             quad_weights = self.pwp.quad_weights_parti
             avg_vals = jnp.einsum('ij,ij->i', u_values_all, quad_weights)/self.elem_area
-            init_coeffs_all = jnp.hstack([avg_vals[..., None] , jnp.zeros((Nt, 2))])
-            perturbations_all = self.sigma * jax.random.uniform(key, (self.N_perturb, 3), minval=-1, maxval=1)
+            init_coeffs_all = jnp.hstack([avg_vals[..., None] , jnp.zeros((Nt, self.p_dof - 1))])
+            perturbations_all = self.sigma * jax.random.uniform(key, (self.N_perturb, self.p_dof), minval=-1, maxval=1)
         
         perturbed_coeffs_all = init_coeffs_all[:, None, :] + perturbations_all[None, :, :]
         loss_all_test, loss_l1_all = vmap(self.loss_fn_elem_int_per_elem, in_axes=(0, 0, None))(jnp.arange(Nt), perturbed_coeffs_all, params)
