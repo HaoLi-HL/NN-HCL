@@ -26,11 +26,11 @@ def pytree_l2_norm(pytree):
     return jnp.sqrt(sum(jnp.sum(leaf**2) for leaf in leaves))
 
 # Optimizer Class
-class MinMaxOptProb:
+class MinMaxOptProb2D:
     def __init__(self, input_dim=2, t_min=0, t_max=1, x_min=0, x_max=1, y_min=None, y_max=None, N_t=10, N_x=10, N_y=None, N_bc=128, N_ic=256, hidden_dims_list=[(64, 64, 64, 64)], seed=0, 
                  sigma=1, N_perturb=10000, k_h_rf_times=2, f_adaptive_weight=1000, f_opt_kh=1, u0=None, u1=None, u2=None, u3=None, u4=None, project="minmax_mgnn_burgers",
-                 lambda_ic=20.0, lambda_bc=10.0, lambda_eqn=1.0, gamma=0.0, alpha=0.9, N_test_gamma = 1000, adjust_gamma=True,
-                 L1reg=1, sampling_method='uniform', notes='', pre_epochs=1000,
+                 lambda_ic=20.0, lambda_bc=10.0, lambda_eqn=1.0, alpha=0.9, gamma=0.0, N_test_gamma = 1000, adjust_gamma=True,
+                 L1reg=0, sampling_method='uniform', notes='', pre_epochs=1000,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  res=None, res_visc=None, use_loss_fn_elem_int=True, k=0, use_a=True, M_t = 1000, M_x = 1000, f_plot=1000, plt_err_dist=False, plt_mesh=False,
                  partition='tri',
@@ -159,9 +159,11 @@ class MinMaxOptProb:
         self.plt_mesh = plt_mesh
         
         if self.partition == 'tri':
-            self.elem_area = 0.5*(self.ht*self.hx)
+            self.elem_meas = 0.5*(self.ht*self.hx)
         elif self.partition == 'rect':
-            self.elem_area = self.ht*self.hx
+            self.elem_meas = self.ht*self.hx
+        elif self.partition == 'hex':
+            self.elem_meas = self.ht * self.hx * self.hy
         else:
             raise ValueError("Partition must be either 'tri' or 'rect'.")
         if self.sampling_method == 'normal':
@@ -243,7 +245,7 @@ class MinMaxOptProb:
             quad_points = self.pwp.quad_points_parti
             u_values_all = self.u_eval(params, quad_points)
             quad_weights = self.pwp.quad_weights_parti
-            avg_vals = jnp.einsum('ij,ij->i', u_values_all, quad_weights)/self.elem_area
+            avg_vals = jnp.einsum('ij,ij->i', u_values_all, quad_weights)/self.elem_meas
             init_coeffs_all = jnp.hstack([avg_vals[..., None] , jnp.zeros((Nt, self.p_dof - 1))])
             perturbations_all = self.sigma * jax.random.uniform(key, (self.N_perturb, self.p_dof), minval=-1, maxval=1)
         
@@ -265,20 +267,11 @@ class MinMaxOptProb:
         if self.input_dim == 2:
             u_t, u_x = grad_u_tx[:, 0], grad_u_tx[:, 1]
             residual = self.res(u_quad, u_t, u_x).flatten()
-            k_h_quad_all = (
-                p_coeffs_all[:, 0][:, None] + 
-                p_coeffs_all[:, 1][:, None] * quad_points[:, 0] + 
-                p_coeffs_all[:, 2][:, None] * quad_points[:, 1]
-            )
         elif self.input_dim == 3:
             u_t, u_x, u_y = grad_u_tx[:, 0], grad_u_tx[:, 1], grad_u_tx[:, 2]
             residual = self.res(u_quad, u_t, u_x, u_y).flatten()
-            k_h_quad_all = (
-                p_coeffs_all[:, 0][:, None] + 
-                p_coeffs_all[:, 1][:, None] * quad_points[:, 0] + 
-                p_coeffs_all[:, 2][:, None] * quad_points[:, 1] + 
-                p_coeffs_all[:, 3][:, None] * quad_points[:, 2]
-            )
+        # Compute k_h for the current element
+        k_h_quad_all = jnp.einsum('ik,kj->ij', p_coeffs_all[:, 1:], quad_points.T) + p_coeffs_all[:, 0][:, None]
         integrand_all = residual[None, :] * jnp.sign(u_quad[None, :] - k_h_quad_all)
         loss = jnp.sum(quad_weights[None, :] * integrand_all, axis=1)
         # Compute absolute loss, which is the L1 norm of the residual. Just for comparison and debugging. We do not use it in the optimization.
@@ -339,7 +332,10 @@ class MinMaxOptProb:
         params = optax.apply_updates(params, updates)
         return all_losses[0], all_losses[1], params, opt_state
 
-    def pre_train_to_ic(self, pre_epochs=1000, pre_lr=1e-3, N_pre=100000):
+    def pre_train_to_ic(self, pre_epochs=0, pre_lr=1e-3, N_pre=100000):
+        if pre_epochs <= 0 and self.pre_epochs <= 0:
+            print("Skipping pre-training as pre_epochs is set to 0.")
+            return
         print("\nPre-training the network to fit v(t, x) = u0(x)")
         # Generate pre-training points
         self.key, subkey = jax.random.split(self.key)
@@ -347,8 +343,8 @@ class MinMaxOptProb:
             tx_pre = jax.random.uniform(subkey, (N_pre, 2), minval=self.lb, maxval=self.ub)
             y_pre = self.u0(tx_pre[:, 1])
         elif self.input_dim == 3:
-            txy_pre = jax.random.uniform(subkey, (N_pre, 3), minval=self.lb, maxval=self.ub)
-            y_pre = self.u0(txy_pre[:, 1], txy_pre[:, 2])
+            tx_pre = jax.random.uniform(subkey, (N_pre, 3), minval=self.lb, maxval=self.ub)
+            y_pre = self.u0(tx_pre[:, 1], tx_pre[:, 2])
 
         # Collect all parameters
         params = self.model.mlps[0].params
@@ -372,9 +368,11 @@ class MinMaxOptProb:
         # Assign back the pre-trained parameters
         self.model.mlps[0].params = params
 
-    def train_process_stage1(self, save_model=True):
+    def train_process_stage1(self, grade_epochs=None, save_model=True):
         self.pre_train_to_ic()
         print("\nStarting Train Stage with MGDL")
+        if grade_epochs is None:
+            grade_epochs = self.grade_epochs
         start_time = time.perf_counter()
         self.global_step = 0
         # Stage 1: Sequential Grade Training
@@ -396,8 +394,8 @@ class MinMaxOptProb:
             if self.gamma > 0.0 and self.adjust_gamma:
                 self.gamma = self.determine_equation_weight(grade_idx, gamma_init=self.gamma)
                 print(f"Stage 1, Gamma: {self.gamma:.6f}")
-            monitor_start = int(0.9 * self.grade_epochs[grade_idx])
-            for iter in range(self.grade_epochs[grade_idx]):
+            monitor_start = int(0.9 * grade_epochs[grade_idx])
+            for iter in range(grade_epochs[grade_idx]):
                 if (iter % self.f_adaptive_weight == 0) and (self.gamma == 0.0):
                     self.update_adaptive_weights(params)
                     print(f"Grade {grade_idx}, Iter {iter}, lambda_ic: {self.lambda_ic:.6f}, lambda_bc: {self.lambda_bc:.6f}, lambda_eqn: {self.lambda_eqn:.6f}")
@@ -428,6 +426,8 @@ class MinMaxOptProb:
                         t_max=self.t_max,
                         x_min=self.x_min,
                         x_max=self.x_max,
+                        y_min=self.y_min if self.input_dim == 3 else None,
+                        y_max=self.y_max if self.input_dim == 3 else None,
                         upload_fig=self.set_wandb
                         )
                     if self.plt_err_dist or self.plt_mesh:
@@ -450,12 +450,12 @@ class MinMaxOptProb:
             if self.best_params_list[grade_idx] is not None:
                 self.model.mlps[grade_idx].params = self.best_params_list[grade_idx]
             self.opt_state_list[grade_idx] = opt_state
-            self.global_step += self.grade_epochs[grade_idx]
+            self.global_step += grade_epochs[grade_idx]
         end_time = time.perf_counter()
         train_total_time = end_time - start_time
         print(f"Train time for stage1: {train_total_time:.6f} seconds")
 
-    def train_process_stage2(self, save_model=True):
+    def train_process_stage2(self, save_model=False):
         # Stage 2: Refinement of Last k Grades
         if self.k > 0 and self.k <= self.total_grade:
             start_time = time.perf_counter()
@@ -476,7 +476,7 @@ class MinMaxOptProb:
             best_params_last_k = None
             for iter in range(self.epoch_stage2):
                 if iter % self.f_adaptive_weight == 0:
-                    self.update_adaptive_weights(params)
+                    self.update_adaptive_weights(params_last_k)
                     print(f"Stage 2, Iter {iter}, lambda_ic: {self.lambda_ic:.6f}, lambda_bc: {self.lambda_bc:.6f}, lambda_eqn: {self.lambda_eqn:.6f}")
                 loss_eqn, loss_ibc, params_last_k, opt_state = self.train_step(params_last_k, optimizer, opt_state)
                 if iter % self.f_opt_kh == 0:
@@ -503,7 +503,6 @@ class MinMaxOptProb:
             end_time = time.perf_counter()
             train_total_time = end_time - start_time
             print(f"Train time for stage2: {train_total_time:.6f} seconds")
-            print(f"Train average time per iteration: {train_total_time / self.epoch_stage2:.9e} seconds")
         
         if save_model:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -627,6 +626,7 @@ class MinMaxOptProb:
             'total_grade': self.total_grade,
             'lb': self.lb,
             'ub': self.ub,
+            'use_a': self.use_a,
         }
         with open(model_path, 'wb') as f:
             pickle.dump(save_dict, f)
@@ -639,8 +639,9 @@ class MinMaxOptProb:
         loaded_total_grade = loaded_data['total_grade']
         lb = loaded_data['lb']
         ub = loaded_data['ub']
-        self.model = MG_NN(input_dim=2, hidden_dims_list=loaded_hidden_dims_list, activation=nn.tanh, lb=lb, ub=ub)
-        for i in range(self.total_grade):
+        use_a = loaded_data['use_a']
+        self.model = MG_NN(input_dim=2, hidden_dims_list=loaded_hidden_dims_list, activation=nn.tanh, lb=lb, ub=ub, use_a=use_a)
+        for i in range(loaded_total_grade):
             self.model.add_grade()  # Add a new grade
         for mlp, params in zip(self.model.mlps, loaded_params):
             mlp.params = params

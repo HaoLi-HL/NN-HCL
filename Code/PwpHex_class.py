@@ -33,7 +33,6 @@ class PiecewiseLinearPolynomialsHex:
         self.bdry_order = bdry_order
         self.N_elements = N_t * N_x * N_y  # Number of hexahedra
         self.partitions = self._generate_hexahedra()
-        print(self.partitions.shape)
         self.coeffs = jnp.zeros((self.N_elements, 4))  # Coefficients a + b*t + c*x + d*y per hexahedron
         self.quad_points, self.quad_weights, self.element_indices, self.quad_points_parti, self.quad_weights_parti = self._setup_quadrature()
         # self.bdry_points_parti, self.bdry_weights_parti = self.get_boundary_quadrature()
