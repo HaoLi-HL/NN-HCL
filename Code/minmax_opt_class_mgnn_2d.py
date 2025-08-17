@@ -292,7 +292,7 @@ class MinMaxOptProb2D:
             residual = self.res(u_quad, u_t, u_x, u_y)
         p_coeffs_quad = self.pwp.coeffs[self.pwp.element_indices]
         k_h_quad = jnp.einsum('ij, ij->i', p_coeffs_quad[:, 1:], quad_points) + p_coeffs_quad[:, 0]
-        integrand = residual * jnp.sign(u_quad - k_h_quad)
+        integrand = (1 - self.L1reg) * residual * jnp.sign(u_quad - k_h_quad)
 
         if self.L1reg > 0:
             integrand += self.L1reg * jnp.abs(self.hx * residual)
