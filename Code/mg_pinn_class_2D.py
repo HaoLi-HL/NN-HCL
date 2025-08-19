@@ -442,7 +442,8 @@ class MinMaxOptProb2D:
                         self.best_params_list[grade_idx] = jax.tree_util.tree_map(jnp.copy, params)
 
                 if iter % 100 == 0:
-                    print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_eqn_from_kh: {loss_eqn_from_kh:.6f}, loss_l1: {loss_l1:.6f}, loss_ibc: {loss_ibc:.6f}")
+                    # print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_eqn_from_kh: {loss_eqn_from_kh:.6f}, loss_l1: {loss_l1:.6f}, loss_ibc: {loss_ibc:.6f}")
+                    print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_l1: {loss_l1:.6f}, loss_ibc: {loss_ibc:.6f}")
                     if self.set_wandb:
                         wandb.log({f"tmin{self.t_min:.1f}_tmax{self.t_max:.1f}_loss_eqn_grade{grade_idx}": loss_eqn, 
                                    f"tmin{self.t_min:.1f}_tmax{self.t_max:.1f}_loss_ibc_grade{grade_idx}": loss_ibc, 
@@ -607,7 +608,8 @@ class MinMaxOptProb2D:
                 loss_history_data.append(loss_data)
                 loss_history_eqn.append(loss_eqn)
                 if iter % 100 == 0:
-                    print(f"Gamma {gamma}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_eqn_from_kh: {loss_eqn_from_kh:.6f}, loss_ibc: {loss_data:.6f}")
+                    # print(f"Gamma {gamma}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_eqn_from_kh: {loss_eqn_from_kh:.6f}, loss_ibc: {loss_data:.6f}")
+                    print(f"Gamma {gamma}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_ibc: {loss_data:.6f}")
 
             # Initial losses (at i=0)
             L0_data = max(loss_history_data[:N1])
