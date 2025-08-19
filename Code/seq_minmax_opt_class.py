@@ -16,8 +16,9 @@ import matplotlib.gridspec as gridspec
 
 
 class SeqMinMaxOptProb:
-    def __init__(self, num_segments=1, total_t_min=0, total_t_max=1, x_min=0, x_max=1, seq_T=None, N_t=10, N_x=10, N_bc=2048, N_ic=4096, hidden_dims_list=[(64, 64, 64, 64)], seed=0, 
-                 sigma=0.1, N_perturb=10000, k_h_rf_times=2, f_adaptive_weight=1000, f_opt_kh=1, u0=None, u1=None, u2=None, project="seq_minmax_burgers",
+    def __init__(self, input_dim=2, num_segments=1, total_t_min=0, total_t_max=1, x_min=0, x_max=1, y_min=None, y_max=None, seq_T=None, N_t=10, N_x=10, N_y=None, 
+                 N_bc=128, N_ic=256, hidden_dims_list=[(64, 64, 64, 64)], seed=0, 
+                 sigma=5, N_perturb=10000, k_h_rf_times=2, f_adaptive_weight=1000, f_opt_kh=1, u0=None, u1=None, u2=None, project="seq_minmax_burgers",
                  lambda_ic=20.0, lambda_bc=20.0, lambda_eqn=1.0, alpha=0.9, gamma=0.0, N_test_gamma=1000, adjust_gamma=True,
                  L1reg=0, sampling_method='uniform', notes='', pre_epochs=1000, nu=0.01/np.pi,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
@@ -35,6 +36,7 @@ class SeqMinMaxOptProb:
             u2 (callable): Boundary condition at x_max.
             ... (other parameters passed to MinMaxOptProb2D)
         """
+        self.input_dim = input_dim
         self.set_wandb = set_wandb
         self.partition = partition
         
@@ -48,10 +50,15 @@ class SeqMinMaxOptProb:
         self.u2 = u2
         self.x_min = x_min
         self.x_max = x_max
+        self.y_min = y_min
+        self.y_max = y_max
+
         self.segments = []  # List to store trained segment instances
         # Store other parameters for segment creation
         self.N_t = N_t
         self.N_x = N_x
+        self.N_y = N_y
+        
         self.hidden_dims_list = hidden_dims_list
         self.seed = seed
         self.sigma = sigma
@@ -145,7 +152,8 @@ class SeqMinMaxOptProb:
 
             # Create a new MinMaxOptProb2D instance for this segment
             segment = MinMaxOptProb2D(
-                t_min=t_min, t_max=t_max, x_min=self.x_min, x_max=self.x_max, N_t=self.N_t, N_x=self.N_x, 
+                input_dim=self.input_dim,
+                t_min=t_min, t_max=t_max, x_min=self.x_min, x_max=self.x_max, y_min=self.y_min, y_max=self.y_max, N_t=self.N_t, N_x=self.N_x, N_y=self.N_y
                 N_bc=self.N_bc, N_ic=self.N_ic, hidden_dims_list=self.hidden_dims_list, seed=self.seed, 
                 sigma=self.sigma, N_perturb=self.N_perturb, k_h_rf_times=self.k_h_rf_times, u0=current_u0, u1=self.u1, u2=self.u2, project=self.project,
                 gamma=self.gamma, alpha=self.alpha, N_test_gamma=self.N_test_gamma, adjust_gamma=self.adjust_gamma, 
