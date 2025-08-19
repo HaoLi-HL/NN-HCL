@@ -211,8 +211,9 @@ class SeqMinMaxOptProb:
             )
 
         # After training all segments, plot the combined output
-        print("\nPlotting combined output across all segments from t=0 to total_t_max")
-        plot_u_theta(self, M_t_per_segment=self.M_t, M_x=self.M_x, upload_fig=self.set_wandb)
+        if self.input_dim == 2:
+            print("\nPlotting combined output across all segments from t=0 to total_t_max")
+            plot_u_theta(self, M_t_per_segment=self.M_t, M_x=self.M_x, upload_fig=self.set_wandb)
         wandb.finish()
 
 
