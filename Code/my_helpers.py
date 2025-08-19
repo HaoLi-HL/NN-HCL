@@ -24,7 +24,8 @@ def plot_loss_history(loss_int, loss_bc, title):
     plt.title(title)
     plt.show()
 
-def plot_u_theta(prob, params=None, M_t=1000, M_t_per_segment=1000, M_x=2000, t_min=None, t_max=None, x_min=None, x_max=None, y_min=None, y_max=None, M_y=2000, ts=None, upload_fig=False, save_path=None, fontsize=16):
+def plot_u_theta(prob, params=None, M_t=1000, M_t_per_segment=1000, M_x=2000, t_min=None, t_max=None, x_min=None, x_max=None, y_min=None, y_max=None, M_y=2000, 
+                 ts=None, upload_fig=False, save_path=None, fontsize=16):
     """
     Plot the neural network function u_theta over a specified domain [t_min, t_max] x [x_min, x_max],
     and include a 1D plot of u_theta at t = t_max. Additionally, plot separate 1D snapshots for each timestamp in ts if provided.
@@ -196,7 +197,14 @@ def plot_u_theta(prob, params=None, M_t=1000, M_t_per_segment=1000, M_x=2000, t_
         if is_3d:
             u_at_t = u_at_t.reshape(x_mesh.shape)
         # Create figure
-        fig, ax = plt.subplots(1, 1, figsize=(10, 4))
+        if is_3d:
+            x_range = x_max - x_min
+            y_range = y_max - y_min
+            fig_width = 5 * x_range + 1.5 
+            fig_height = 5 * y_range
+            fig, ax = plt.subplots(1, 1, figsize=(fig_width, fig_height))
+        else:
+            fig, ax = plt.subplots(1, 1, figsize=(10, 4))
         if is_3d:
             pcm = ax.pcolormesh(x_grid, y_grid, u_at_t.T, shading='nearest', cmap='viridis')
             pcm.set_rasterized(True)
@@ -211,7 +219,7 @@ def plot_u_theta(prob, params=None, M_t=1000, M_t_per_segment=1000, M_x=2000, t_
         ax.set_title(f'Neural Network Function at t = {t_val:.2f}', fontsize=fontsize)
         plt.tight_layout()
         plt.show()
-        
+
 def plot_kh(pwp, M_factor=10):
     """
     Plot the piecewise linear polynomial k_h over the domain [t_min, t_max] x [x_min, x_max]
@@ -655,7 +663,7 @@ def plot_comparison_seperate(model, u_ref=None, file_path='data/burgers_sin_ref.
         u_num = np.array([u_ref(t, x) for t in times])  # Shape: (len(ts), n_x)
 
     # Create subplots: one for each timestamp
-    fig, axs = plt.subplots(len(ts), 1, figsize=(10, 4 * len(ts)), squeeze=False)
+    fig, axs = plt.subplots(len(ts), 1, figsize=(10, 5 * len(ts)), squeeze=False)
     axs = axs.flatten()  # Ensure axs is iterable even for len(ts)=1
 
     for i, t_val in enumerate(ts):
@@ -878,7 +886,7 @@ def plot_u_2D(ts, u_given, x_min=0.0, x_max=1.0, y_min=0.0, y_max=1.0, nx=1000, 
     nrows = int(np.ceil(np.sqrt(num_times)))
     ncols = int(np.ceil(num_times / nrows))
     
-    fig, axs = plt.subplots(nrows, ncols, figsize=(4 * ncols+1, 4 * nrows), squeeze=False)
+    fig, axs = plt.subplots(nrows, ncols, figsize=(5 * ncols+1, 5 * nrows), squeeze=False)
     
     for i, t in enumerate(ts):
         row = i // ncols
