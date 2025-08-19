@@ -438,8 +438,6 @@ class MinMaxOptProb2D:
                 loss_eqn, loss_ibc, params, opt_state = self.train_step(params, optimizer, opt_state)
                 if iter % self.f_opt_kh == 0 and self.loss_type != 'pinn':
                     self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params, self.key)
-                loss, (loss_eqn, loss_ibc) = self.loss_fn(params)
-
                 self.loss_eqn_history[grade_idx].append(loss_eqn)
                 self.loss_bc_history[grade_idx].append(loss_ibc)
                 if iter >= monitor_start:
@@ -467,6 +465,7 @@ class MinMaxOptProb2D:
                         x_max=self.x_max,
                         y_min=self.y_min if self.input_dim == 3 else None,
                         y_max=self.y_max if self.input_dim == 3 else None,
+                        ts=jnp.linspace(self.t_min, self.t_max, 2) if self.input_dim == 3 else None,
                         upload_fig=self.set_wandb
                         )
                     if self.plt_err_dist or self.plt_mesh:
