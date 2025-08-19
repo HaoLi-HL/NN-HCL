@@ -886,7 +886,7 @@ def plot_u_2D(ts, u_given, x_min=0.0, x_max=1.0, y_min=0.0, y_max=1.0, nx=1000, 
     nrows = int(np.ceil(np.sqrt(num_times)))
     ncols = int(np.ceil(num_times / nrows))
     
-    fig, axs = plt.subplots(nrows, ncols, figsize=(5 * ncols+1, 5 * nrows), squeeze=False)
+    fig, axs = plt.subplots(nrows, ncols, figsize=(5 * ncols + 1.5, 5 * nrows), squeeze=False)
     
     for i, t in enumerate(ts):
         row = i // ncols

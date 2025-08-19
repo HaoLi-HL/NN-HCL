@@ -107,15 +107,16 @@ class MinMaxOptProb2D:
         self.f_opt_kh = f_opt_kh
         self.alpha = alpha
         self.res = res
+        self.loss_type = loss_type
 
         self.pre_epochs = pre_epochs
         self.nu = nu
         self.gen_ibc()
-        if loss_type == 'interior':
+        if self.loss_type == 'interior':
             self.loss_fn_eqn = self.loss_fn_elem_int
-        elif loss_type == 'boundary':
+        elif self.loss_type == 'boundary':
             self.loss_fn_eqn = self.loss_fn_elem_bdry
-        elif loss_type == 'pinn':
+        elif self.loss_type == 'pinn':
             self.loss_fn_eqn = self.loss_fn_pinn
 
         if self.gamma > 0.0:
@@ -417,7 +418,8 @@ class MinMaxOptProb2D:
             params = self.model.mlps[grade_idx].params
             optimizer = self.optimizer_list[grade_idx]
             opt_state = self.opt_state_list[grade_idx]
-            self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params, self.key)
+            if self.loss_type != 'pinn':
+                self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params, self.key)
             print(f"The largest W^{{1,inf}} norm of k_h coeffs is {jnp.max(jnp.abs(self.pwp.coeffs[:,1:])):.6f}")
             if self.gamma > 0.0 and self.adjust_gamma:
                 self.gamma = self.determine_equation_weight(grade_idx, gamma_init=self.gamma)
@@ -428,7 +430,7 @@ class MinMaxOptProb2D:
                     self.update_adaptive_weights(params)
                     print(f"Grade {grade_idx}, Iter {iter}, lambda_ic: {self.lambda_ic:.6f}, lambda_bc: {self.lambda_bc:.6f}, lambda_eqn: {self.lambda_eqn:.6f}")
                 loss_eqn, loss_ibc, params, opt_state = self.train_step(params, optimizer, opt_state)
-                if iter % self.f_opt_kh == 0:
+                if iter % self.f_opt_kh == 0 and self.loss_type != 'pinn':
                     self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params, self.key)
                 loss, (loss_eqn, loss_ibc) = self.loss_fn(params)
 
@@ -498,7 +500,8 @@ class MinMaxOptProb2D:
             self.opt_state_stage2 = self.optimizer_stage2.init(params_last_k)
             optimizer = self.optimizer_stage2
             opt_state = self.opt_state_stage2
-            self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params_last_k, self.key)
+            if self.loss_type != 'pinn':
+                self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params_last_k, self.key)
             monitor_start = int(0.9 * self.epoch_stage2)
             best_loss_eqn = float('inf')
             best_params_last_k = None
@@ -507,7 +510,7 @@ class MinMaxOptProb2D:
                     self.update_adaptive_weights(params_last_k)
                     print(f"Stage 2, Iter {iter}, lambda_ic: {self.lambda_ic:.6f}, lambda_bc: {self.lambda_bc:.6f}, lambda_eqn: {self.lambda_eqn:.6f}")
                 loss_eqn, loss_ibc, params_last_k, opt_state = self.train_step(params_last_k, optimizer, opt_state)
-                if iter % self.f_opt_kh == 0:
+                if iter % self.f_opt_kh == 0 and self.loss_type != 'pinn':
                     self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params_last_k, self.key)
                 loss_eqn = loss_eqn_fn(params_last_k)
                 loss_ibc = loss_data_fn(params_last_k)
@@ -590,12 +593,13 @@ class MinMaxOptProb2D:
             # Collect loss history
             loss_history_data = []
             loss_history_eqn = []
-            self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(current_params, self.key)
+            if self.loss_type != 'pinn':
+                self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(current_params, self.key)
             for iter in range(self.N_test_gamma):
                 (loss, (loss_eqn, loss_data)), grads = jax.value_and_grad(total_loss, has_aux=True)(current_params)
                 updates, current_opt_state = optimizer.update(grads, current_opt_state)
                 current_params = optax.apply_updates(current_params, updates)
-                if iter % self.f_opt_kh == 0:
+                if iter % self.f_opt_kh == 0 and self.loss_type != 'pinn':
                     self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(current_params, self.key)
                 # Store losses
                 loss_eqn = loss_eqn_fn(current_params)
