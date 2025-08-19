@@ -6,7 +6,7 @@ from MGNN_class import MLP, MG_NN
 from datetime import datetime
 import os
 import pickle
-from minmax_opt_class_mgnn import MinMaxOptProb
+from minmax_opt_class_mgnn_2d import MinMaxOptProb2D
 from my_helpers import plot_u_theta, plot_loss_history
 import matplotlib.pyplot as plt
 import wandb
@@ -18,10 +18,10 @@ import matplotlib.gridspec as gridspec
 class SeqMinMaxOptProb:
     def __init__(self, num_segments=1, total_t_min=0, total_t_max=1, x_min=0, x_max=1, seq_T=None, N_t=10, N_x=10, N_bc=2048, N_ic=4096, hidden_dims_list=[(64, 64, 64, 64)], seed=0, 
                  sigma=0.1, N_perturb=10000, k_h_rf_times=2, f_adaptive_weight=1000, f_opt_kh=1, u0=None, u1=None, u2=None, project="seq_minmax_burgers",
-                 lambda_ic=10.0, lambda_bc=10.0, lambda_eqn=1.0, alpha=0.9, gamma=0.0, N_test_gamma=1000, adjust_gamma=True,
-                 L1reg=0, sampling_method='uniform', notes='', pre_epochs=1000,
+                 lambda_ic=20.0, lambda_bc=20.0, lambda_eqn=1.0, alpha=0.9, gamma=0.0, N_test_gamma=1000, adjust_gamma=True,
+                 L1reg=0, sampling_method='uniform', notes='', pre_epochs=1000, nu=0.01/np.pi,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
-                 res=None, res_visc=None, use_loss_fn_elem_int=True,  k=0, use_a=True, f_plot=1000, plt_err_dist=False, plt_mesh=False,
+                 res=None, loss_type='interior',  k=0, use_a=True, f_plot=1000, plt_err_dist=False, plt_mesh=False,
                  partition='tri',
                  M_t=1000, M_x=2000, set_wandb=False):
         """
@@ -33,7 +33,7 @@ class SeqMinMaxOptProb:
             u0 (callable): Initial condition function for the first segment.
             u1 (callable): Boundary condition at x_min.
             u2 (callable): Boundary condition at x_max.
-            ... (other parameters passed to MinMaxOptProb)
+            ... (other parameters passed to MinMaxOptProb2D)
         """
         self.set_wandb = set_wandb
         self.partition = partition
@@ -70,6 +70,7 @@ class SeqMinMaxOptProb:
         self.sampling_method = sampling_method
         self.notes = notes
         self.pre_epochs = pre_epochs
+        self.nu = nu
         self.init_lrs = init_lrs
         self.grade_epochs = grade_epochs
         self.decay_rates = decay_rates
@@ -79,8 +80,8 @@ class SeqMinMaxOptProb:
         self.f_adaptive_weight = f_adaptive_weight
         self.f_opt_kh = f_opt_kh
         self.res = res
-        self.res_visc = res_visc
-        self.use_loss_fn_elem_int = use_loss_fn_elem_int
+
+        self.loss_type = loss_type
         self.k = k
         self.use_a = use_a
         self.M_t = M_t
@@ -142,18 +143,18 @@ class SeqMinMaxOptProb:
                     jnp.stack([jnp.ones_like(x) * prev_segment.pwp.t_max, x], axis=1)
                 )
 
-            # Create a new MinMaxOptProb instance for this segment
-            segment = MinMaxOptProb(
+            # Create a new MinMaxOptProb2D instance for this segment
+            segment = MinMaxOptProb2D(
                 t_min=t_min, t_max=t_max, x_min=self.x_min, x_max=self.x_max, N_t=self.N_t, N_x=self.N_x, 
                 N_bc=self.N_bc, N_ic=self.N_ic, hidden_dims_list=self.hidden_dims_list, seed=self.seed, 
                 sigma=self.sigma, N_perturb=self.N_perturb, k_h_rf_times=self.k_h_rf_times, u0=current_u0, u1=self.u1, u2=self.u2, project=self.project,
                 gamma=self.gamma, alpha=self.alpha, N_test_gamma=self.N_test_gamma, adjust_gamma=self.adjust_gamma, 
                 lambda_ic=self.lambda_ic, lambda_bc=self.lambda_bc, lambda_eqn=self.lambda_eqn,
-                L1reg=self.L1reg, sampling_method=self.sampling_method, notes=self.notes, pre_epochs=self.pre_epochs,
+                L1reg=self.L1reg, sampling_method=self.sampling_method, notes=self.notes, pre_epochs=self.pre_epochs, nu=self.nu,
                 init_lrs=self.init_lrs, grade_epochs=grade_epochs, decay_rates=self.decay_rates, 
                 init_lr_stage2=self.init_lr_stage2, epoch_stage2=epoch_stage2, decay_rate_stage2=self.decay_rate_stage2,
-                f_adaptive_weight=self.f_adaptive_weight, f_opt_kh=self.f_opt_kh, res=self.res, res_visc=self.res_visc, 
-                use_loss_fn_elem_int=self.use_loss_fn_elem_int, k=self.k, use_a=self.use_a, 
+                f_adaptive_weight=self.f_adaptive_weight, f_opt_kh=self.f_opt_kh, res=self.res, 
+                loss_type=self.loss_type, k=self.k, use_a=self.use_a, 
                 f_plot=self.f_plot, plt_err_dist=self.plt_err_dist, plt_mesh=self.plt_mesh, partition=self.partition, M_t=self.M_t, M_x=self.M_x,
                 seq_train=True, set_wandb=self.set_wandb,
             )
@@ -262,7 +263,7 @@ def load_seq_model(model_path):
     
     seq_obj.segments = []
     for segment_params in loaded_data['segments_params']:
-        segment = MinMaxOptProb(
+        segment = MinMaxOptProb2D(
             **config
         )
         segment.load_model_dict(segment_params)

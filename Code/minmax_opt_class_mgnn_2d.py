@@ -29,10 +29,10 @@ def pytree_l2_norm(pytree):
 class MinMaxOptProb2D:
     def __init__(self, input_dim=2, t_min=0, t_max=1, x_min=0, x_max=1, y_min=None, y_max=None, N_t=10, N_x=10, N_y=None, N_bc=128, N_ic=256, hidden_dims_list=[(64, 64, 64, 64)], seed=0, 
                  sigma=1, N_perturb=10000, k_h_rf_times=2, f_adaptive_weight=1000, f_opt_kh=1, u0=None, u1=None, u2=None, u3=None, u4=None, project="minmax_mgnn_burgers",
-                 lambda_ic=20.0, lambda_bc=10.0, lambda_eqn=1.0, alpha=0.9, gamma=0.0, N_test_gamma = 1000, adjust_gamma=True,
-                 L1reg=0, sampling_method='uniform', notes='', pre_epochs=1000,
+                 lambda_ic=20.0, lambda_bc=20.0, lambda_eqn=1.0, alpha=0.9, gamma=0.0, N_test_gamma = 1000, adjust_gamma=True,
+                 L1reg=0, sampling_method='uniform', notes='', pre_epochs=1000, nu=0.01/np.pi,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
-                 res=None, res_visc=None, use_loss_fn_elem_int=True, k=0, use_a=True, M_t = 1000, M_x = 1000, f_plot=1000, plt_err_dist=False, plt_mesh=False,
+                 res=None, loss_type='interior', k=0, use_a=True, M_t = 1000, M_x = 1000, f_plot=1000, plt_err_dist=False, plt_mesh=False,
                  partition='tri',
                  seq_train=False, set_wandb=False):
         self.input_dim = input_dim
@@ -72,9 +72,9 @@ class MinMaxOptProb2D:
         if self.partition == 'tri' and self.input_dim == 2:
             self.pwp = PiecewiseLinearPolynomialsTri(N_t, N_x, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, times=k_h_rf_times)
         elif self.partition == 'rect' and self.input_dim == 2:
-            self.pwp = PiecewiseLinearPolynomialsRect(N_t, N_x, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, gauss_order=2**k_h_rf_times)
+            self.pwp = PiecewiseLinearPolynomialsRect(N_t, N_x, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, gauss_order=k_h_rf_times)
         elif self.partition == 'hex' or self.input_dim == 3:
-            self.pwp = PiecewiseLinearPolynomialsHex(N_t, N_x, self.N_y, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, y_min=self.y_min, y_max=self.y_max, gauss_order=2**k_h_rf_times)
+            self.pwp = PiecewiseLinearPolynomialsHex(N_t, N_x, self.N_y, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, y_min=self.y_min, y_max=self.y_max, gauss_order=k_h_rf_times)
         else:
             raise ValueError("Partition must be 'tri' or 'rect' for 2D, 'hex' for 3D.")
 
@@ -106,15 +106,19 @@ class MinMaxOptProb2D:
         self.f_adaptive_weight = f_adaptive_weight
         self.f_opt_kh = f_opt_kh
         self.alpha = alpha
-        self.res_visc = res_visc
         self.res = res
+        self.loss_type = loss_type
 
         self.pre_epochs = pre_epochs
+        self.nu = nu
         self.gen_ibc()
-        if use_loss_fn_elem_int:
+        if self.loss_type == 'interior':
             self.loss_fn_eqn = self.loss_fn_elem_int
-        else:
+        elif self.loss_type == 'boundary':
             self.loss_fn_eqn = self.loss_fn_elem_bdry
+        elif self.loss_type == 'pinn':
+            self.loss_fn_eqn = self.loss_fn_pinn
+
         if self.gamma > 0.0:
             self.loss_fn = self.loss_fn_gamma
         else:
@@ -132,20 +136,21 @@ class MinMaxOptProb2D:
         self.init_lrs = init_lrs
         self.grade_epochs = grade_epochs
         self.decay_rates = decay_rates
-        self.optimizer_list = []
         self.params_list = []
         self.lr_schedulers = []
+        self.optimizer_list = []
+        self.opt_state_list = []
         for i in range(self.total_grade):
             self.model.add_grade()  # Add a new grade
             self.params_list.append(self.model.mlps[i].params)
             # lr = optax.schedules.constant_schedule(init_lrs[i])
             # lr = optax.schedules.exponential_decay(init_value=init_lrs[i], transition_steps=grade_epochs[i], decay_rate=decay_rates[i])
             # lr = optax.schedules.warmup_exponential_decay_schedule(init_value=1e-6, peak_value=init_lrs[i], warmup_steps=100, transition_steps=grade_epochs[i], decay_rate=decay_rates[i], end_value=1e-6)
-            lr = optax.schedules.warmup_cosine_decay_schedule(init_value=1e-6, peak_value=init_lrs[i], warmup_steps=int(grade_epochs[i]/50), decay_steps=grade_epochs[i], end_value=1e-5)
+            # lr = optax.schedules.warmup_cosine_decay_schedule(init_value=1e-6, peak_value=init_lrs[i], warmup_steps=int(grade_epochs[i]/100), decay_steps=grade_epochs[i], end_value=1e-5)
             # lr = optax.schedules.cosine_decay_schedule(init_value=init_lrs[i], decay_steps=grade_epochs[i])
-            self.lr_schedulers.append(lr)
-            self.optimizer_list.append(optax.adam(self.lr_schedulers[i]))
-        self.opt_state_list = [opt.init(self.model.mlps[i].params) for i, opt in enumerate(self.optimizer_list)]
+            # self.lr_schedulers.append(lr)
+            # self.optimizer_list.append(optax.adam(self.lr_schedulers[i]))
+        # self.opt_state_list = [opt.init(self.model.mlps[i].params) for i, opt in enumerate(self.optimizer_list)]
         # Optimizer for the second stage
         self.init_lr_stage2 = init_lr_stage2
         self.epoch_stage2 = epoch_stage2
@@ -229,6 +234,13 @@ class MinMaxOptProb2D:
         self.u_eval = jit(vmap(net_u, in_axes = (None, 0)))
         self.grad_u = jit(vmap(grad(net_u, argnums=1), in_axes = (None, 0)))
         self.hessian_u = jit(vmap(hessian(net_u, argnums=1), in_axes = (None, 0)))
+        def laplacian_fn(params, X):
+            hess = self.hessian_u(params, X)
+            if self.input_dim == 2:
+                return hess[:, 1]
+            elif self.input_dim == 3:
+                return jnp.trace(hess[:, 1:, 1:], axis1=1, axis2=2)
+        self.laplacian = jit(laplacian_fn)
 
     def maximize_kh_step(self, params, current_key):
         Nt = self.pwp.N_elements
@@ -294,7 +306,7 @@ class MinMaxOptProb2D:
         k_h_quad = jnp.einsum('ij, ij->i', p_coeffs_quad[:, 1:], quad_points) + p_coeffs_quad[:, 0]
         integrand = (1 - self.L1reg) * residual * jnp.sign(u_quad - k_h_quad)
 
-        if self.L1reg > 0:
+        if self.L1reg > 1e-6:
             integrand += self.L1reg * jnp.abs(self.hx * residual)
             
         interior_loss = jnp.dot(quad_weights, integrand)
@@ -367,7 +379,25 @@ class MinMaxOptProb2D:
 
         # Assign back the pre-trained parameters
         self.model.mlps[0].params = params
-
+    
+    def loss_fn_pinn(self, params):
+        """Loss function for PINN training."""
+        # Interior loss
+        quad_points = self.pwp.quad_points
+        quad_weights = self.pwp.quad_weights
+        u_quad = self.u_eval(params, quad_points)
+        grad_u_tx = self.grad_u(params, quad_points)
+        if self.input_dim == 2:
+            u_t, u_x = grad_u_tx[:, 0], grad_u_tx[:, 1]
+            residual = self.res(u_quad, u_t, u_x)
+        elif self.input_dim == 3:
+            u_t, u_x, u_y = grad_u_tx[:, 0], grad_u_tx[:, 1], grad_u_tx[:, 2]
+            residual = self.res(u_quad, u_t, u_x, u_y)
+        lap = self.laplacian(params, quad_points)
+        residual = self.res(u_quad, u_t, u_x, u_y) - self.nu*lap
+        interior_loss = jnp.dot(quad_weights, residual**2)
+        return interior_loss
+    
     def train_process_stage1(self, grade_epochs=None, save_model=True):
         self.pre_train_to_ic()
         print("\nStarting Train Stage with MGDL")
@@ -384,12 +414,18 @@ class MinMaxOptProb2D:
 
         for grade_idx in range(self.total_grade):
             print(f"\nTraining Grade {grade_idx}")
+            lr = optax.schedules.warmup_cosine_decay_schedule(init_value=1e-6, peak_value=self.init_lrs[grade_idx], warmup_steps=int(grade_epochs[grade_idx]/100), decay_steps=grade_epochs[grade_idx], end_value=1e-5)
+            optimizer = optax.adam(lr)
+            params = self.model.mlps[grade_idx].params
+            opt_state = optimizer.init(params)
+            self.optimizer_list.append(optimizer)
+            self.opt_state_list.append(opt_state)
+
             self.gen_funcs(grade_idx)
             self.maximize_kh = jit(self.maximize_kh_step)
-            params = self.model.mlps[grade_idx].params
-            optimizer = self.optimizer_list[grade_idx]
-            opt_state = self.opt_state_list[grade_idx]
-            self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params, self.key)
+
+            if self.loss_type != 'pinn':
+                self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params, self.key)
             print(f"The largest W^{{1,inf}} norm of k_h coeffs is {jnp.max(jnp.abs(self.pwp.coeffs[:,1:])):.6f}")
             if self.gamma > 0.0 and self.adjust_gamma:
                 self.gamma = self.determine_equation_weight(grade_idx, gamma_init=self.gamma)
@@ -400,10 +436,8 @@ class MinMaxOptProb2D:
                     self.update_adaptive_weights(params)
                     print(f"Grade {grade_idx}, Iter {iter}, lambda_ic: {self.lambda_ic:.6f}, lambda_bc: {self.lambda_bc:.6f}, lambda_eqn: {self.lambda_eqn:.6f}")
                 loss_eqn, loss_ibc, params, opt_state = self.train_step(params, optimizer, opt_state)
-                if iter % self.f_opt_kh == 0:
+                if iter % self.f_opt_kh == 0 and self.loss_type != 'pinn':
                     self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params, self.key)
-                loss, (loss_eqn, loss_ibc) = self.loss_fn(params)
-
                 self.loss_eqn_history[grade_idx].append(loss_eqn)
                 self.loss_bc_history[grade_idx].append(loss_ibc)
                 if iter >= monitor_start:
@@ -412,7 +446,10 @@ class MinMaxOptProb2D:
                         self.best_params_list[grade_idx] = jax.tree_util.tree_map(jnp.copy, params)
 
                 if iter % 100 == 0:
-                    print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_eqn_from_kh: {loss_eqn_from_kh:.6f}, loss_l1: {loss_l1:.6f}, loss_ibc: {loss_ibc:.6f}")
+                    if self.loss_type == 'pinn':
+                        print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_ibc: {loss_ibc:.6f}")
+                    else:
+                        print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_eqn_from_kh: {loss_eqn_from_kh:.6f}, loss_l1: {loss_l1:.6f}, loss_ibc: {loss_ibc:.6f}")
                     if self.set_wandb:
                         wandb.log({f"tmin{self.t_min:.1f}_tmax{self.t_max:.1f}_loss_eqn_grade{grade_idx}": loss_eqn, 
                                    f"tmin{self.t_min:.1f}_tmax{self.t_max:.1f}_loss_ibc_grade{grade_idx}": loss_ibc, 
@@ -428,6 +465,7 @@ class MinMaxOptProb2D:
                         x_max=self.x_max,
                         y_min=self.y_min if self.input_dim == 3 else None,
                         y_max=self.y_max if self.input_dim == 3 else None,
+                        ts=jnp.linspace(self.t_min, self.t_max, 2) if self.input_dim == 3 else None,
                         upload_fig=self.set_wandb
                         )
                     if self.plt_err_dist or self.plt_mesh:
@@ -444,12 +482,10 @@ class MinMaxOptProb2D:
                             vals=loss_each_elem if self.plt_err_dist else None,
                             )
                 self.model.mlps[grade_idx].params = params
-                self.opt_state_list[grade_idx] = opt_state
 
             # Assign the best params found in the last 10%
             if self.best_params_list[grade_idx] is not None:
                 self.model.mlps[grade_idx].params = self.best_params_list[grade_idx]
-            self.opt_state_list[grade_idx] = opt_state
             self.global_step += grade_epochs[grade_idx]
         end_time = time.perf_counter()
         train_total_time = end_time - start_time
@@ -470,7 +506,8 @@ class MinMaxOptProb2D:
             self.opt_state_stage2 = self.optimizer_stage2.init(params_last_k)
             optimizer = self.optimizer_stage2
             opt_state = self.opt_state_stage2
-            self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params_last_k, self.key)
+            if self.loss_type != 'pinn':
+                self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params_last_k, self.key)
             monitor_start = int(0.9 * self.epoch_stage2)
             best_loss_eqn = float('inf')
             best_params_last_k = None
@@ -479,7 +516,7 @@ class MinMaxOptProb2D:
                     self.update_adaptive_weights(params_last_k)
                     print(f"Stage 2, Iter {iter}, lambda_ic: {self.lambda_ic:.6f}, lambda_bc: {self.lambda_bc:.6f}, lambda_eqn: {self.lambda_eqn:.6f}")
                 loss_eqn, loss_ibc, params_last_k, opt_state = self.train_step(params_last_k, optimizer, opt_state)
-                if iter % self.f_opt_kh == 0:
+                if iter % self.f_opt_kh == 0 and self.loss_type != 'pinn':
                     self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params_last_k, self.key)
                 loss_eqn = loss_eqn_fn(params_last_k)
                 loss_ibc = loss_data_fn(params_last_k)
@@ -562,12 +599,13 @@ class MinMaxOptProb2D:
             # Collect loss history
             loss_history_data = []
             loss_history_eqn = []
-            self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(current_params, self.key)
+            if self.loss_type != 'pinn':
+                self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(current_params, self.key)
             for iter in range(self.N_test_gamma):
                 (loss, (loss_eqn, loss_data)), grads = jax.value_and_grad(total_loss, has_aux=True)(current_params)
                 updates, current_opt_state = optimizer.update(grads, current_opt_state)
                 current_params = optax.apply_updates(current_params, updates)
-                if iter % self.f_opt_kh == 0:
+                if iter % self.f_opt_kh == 0 and self.loss_type != 'pinn':
                     self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(current_params, self.key)
                 # Store losses
                 loss_eqn = loss_eqn_fn(current_params)
@@ -575,7 +613,10 @@ class MinMaxOptProb2D:
                 loss_history_data.append(loss_data)
                 loss_history_eqn.append(loss_eqn)
                 if iter % 100 == 0:
-                    print(f"Gamma {gamma}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_eqn_from_kh: {loss_eqn_from_kh:.6f}, loss_ibc: {loss_data:.6f}")
+                    if self.loss_type == 'pinn':
+                        print(f"Gamma {gamma}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_ibc: {loss_data:.6f}")
+                    else:
+                        print(f"Gamma {gamma}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_eqn_from_kh: {loss_eqn_from_kh:.6f}, loss_l1: {loss_l1:.6f}, loss_ibc: {loss_data:.6f}")
 
             # Initial losses (at i=0)
             L0_data = max(loss_history_data[:N1])
