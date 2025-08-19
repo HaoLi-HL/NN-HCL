@@ -148,9 +148,10 @@ class SeqMinMaxOptProb:
                 current_u0 = self.u0
             else:
                 prev_segment = self.segments[i - 1]
-                current_u0 = lambda x: prev_segment.model.forward(
-                    jnp.stack([jnp.ones_like(x) * prev_segment.pwp.t_max, x], axis=1)
-                )
+                if self.input_dim == 2:
+                    current_u0 = lambda x: prev_segment.model.forward(jnp.stack([jnp.ones_like(x) * prev_segment.pwp.t_max, x], axis=1))
+                elif self.input_dim == 3:
+                    current_u0 = lambda x, y: prev_segment.model.forward(jnp.stack([jnp.ones_like(x) * prev_segment.pwp.t_max, x, y], axis=1))
 
             # Create a new MinMaxOptProb2D instance for this segment
             segment = MinMaxOptProb2D(
@@ -203,6 +204,9 @@ class SeqMinMaxOptProb:
                 t_max=t_max,
                 x_min=self.x_min,
                 x_max=self.x_max,
+                y_min=self.y_min if self.input_dim == 3 else None,
+                y_max=self.y_max if self.input_dim == 3 else None,
+                ts=jnp.linspace(t_min, t_max, 2) if self.input_dim == 3 else None,
                 upload_fig=self.set_wandb
             )
 
