@@ -297,6 +297,7 @@ class MinMaxOptProb2D:
         quad_weights = self.pwp.quad_weights
         u_quad = self.u_eval(params, quad_points)
         grad_u_tx = self.grad_u(params, quad_points)
+        print(f"grad_u_tx.shape: {grad_u_tx.shape}", f"u_quad.shape: {u_quad.shape}")
         if self.input_dim == 2:
             u_t, u_x = grad_u_tx[:, 0], grad_u_tx[:, 1]
             residual = self.res(u_quad, u_t, u_x)
