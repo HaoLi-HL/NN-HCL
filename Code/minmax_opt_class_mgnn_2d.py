@@ -296,7 +296,7 @@ class MinMaxOptProb2D:
                 p_coeffs_all[:, 3][:, None] * quad_points[:, 2]
                 )
         # Compute k_h for the current element
-        # k_h_quad_all = p_coeffs_all[:, 1:]@quad_points.T + p_coeffs_all[:, 0][:, None]
+        # k_h_quad_all = p_coeffs_all[:, 1:]@quad_points.T + p_coeffs_all[:, 0][:, None] # This code looks concise but it costs more memory.
         integrand_all = residual[None, :] * jnp.sign(u_quad[None, :] - k_h_quad_all)
         loss = jnp.sum(quad_weights[None, :] * integrand_all, axis=1)
         # Compute absolute loss, which is the L1 norm of the residual. Just for comparison and debugging. We do not use it in the optimization.
@@ -342,7 +342,8 @@ class MinMaxOptProb2D:
     def loss_fn_lambda(self, params):
         loss_ic = self.loss_fn_ic(params)
         loss_bc = self.loss_fn_bc(params)
-        loss_eqn = self.loss_fn_eqn(params)
+        # loss_eqn = self.loss_fn_eqn(params)
+        loss_eqn = 0
         total_loss = self.lambda_eqn * loss_eqn + self.lambda_ic * loss_ic + self.lambda_bc * loss_bc
         return total_loss, (loss_eqn, loss_ic + loss_bc)
     
