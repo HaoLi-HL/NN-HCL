@@ -260,7 +260,7 @@ class MinMaxOptProb2D:
             quad_weights = self.pwp.quad_weights_parti
             avg_vals = jnp.einsum('ij,ij->i', u_values_all, quad_weights)/self.elem_meas
             init_coeffs_all = jnp.hstack([avg_vals[..., None] , jnp.zeros((Nt, self.p_dof - 1))])
-            print(f"init_coeffs_all.shape: {init_coeffs_all.shape}, avg_vals.shape: {avg_vals.shape}")
+            # print(f"init_coeffs_all.shape: {init_coeffs_all.shape}, avg_vals.shape: {avg_vals.shape}")
             perturbations_all = self.sigma * jax.random.uniform(key, (self.N_perturb, self.p_dof), minval=-1, maxval=1)
         
         perturbed_coeffs_all = init_coeffs_all[:, None, :] + perturbations_all[None, :, :]
@@ -285,7 +285,7 @@ class MinMaxOptProb2D:
             u_t, u_x, u_y = grad_u_tx[:, 0], grad_u_tx[:, 1], grad_u_tx[:, 2]
             residual = self.res(u_quad, u_t, u_x, u_y).flatten()
         # Compute k_h for the current element
-        k_h_quad_all = jnp.einsum('ik,kj->ij', p_coeffs_all[:, 1:], quad_points.T) + p_coeffs_all[:, 0][:, None]
+        k_h_quad_all = p_coeffs_all[:, 1:]@quad_points.T + p_coeffs_all[:, 0][:, None]
         integrand_all = residual[None, :] * jnp.sign(u_quad[None, :] - k_h_quad_all)
         loss = jnp.sum(quad_weights[None, :] * integrand_all, axis=1)
         # Compute absolute loss, which is the L1 norm of the residual. Just for comparison and debugging. We do not use it in the optimization.
