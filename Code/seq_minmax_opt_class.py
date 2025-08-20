@@ -103,7 +103,7 @@ class SeqMinMaxOptProb:
         elif self.input_dim == 3:
             self.run_name = f"({total_t_max:.1f}-{total_t_min:.1f})/{num_segments}_Nt{N_t}_Nx{N_x}_Ny{N_y}_lrs{init_lrs[0]}_eps{grade_epochs[0]}_sig{sigma}_Np{N_perturb}_gam{gamma}_L1reg{L1reg}_sd{seed}"
         self.project = project
-        self.u_ref = u_ref,
+        self.u_ref = u_ref
 
         if self.set_wandb:
             wandb.init(project=self.project, 
