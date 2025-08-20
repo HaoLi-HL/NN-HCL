@@ -25,7 +25,7 @@ def plot_loss_history(loss_int, loss_bc, title):
     plt.show()
 
 def plot_u_theta(prob, params=None, M_t=1000, M_t_per_segment=1000, M_x=2000, t_min=None, t_max=None, x_min=None, x_max=None, y_min=None, y_max=None, M_y=2000, 
-                 ts=None, upload_fig=False, save_path=None, fontsize=16):
+                 ts=None, upload_fig=False, save_path=None, fontsize=16, u_ref=None, file_path=None):
     """
     Plot the neural network function u_theta over a specified domain [t_min, t_max] x [x_min, x_max],
     and include a 1D plot of u_theta at t = t_max. Additionally, plot separate 1D snapshots for each timestamp in ts if provided.
@@ -48,6 +48,8 @@ def plot_u_theta(prob, params=None, M_t=1000, M_t_per_segment=1000, M_x=2000, t_
         upload_fig: Whether to upload the figure to wandb (default: False).
         save_path: Path to save the figure (default: None, does not save if None).
         fontsize: Font size for axis labels, ticks, title, and annotations (default: 12).
+        u_ref: Reference function u_ref(t, x, y) for 3D comparison, where t is scalar, x and y are 2D arrays (default: None).
+        file_path: Path to .npz file with 'times', 'x', 'y', 'u' for reference (default: None).
     """
     if ts is None:
         ts = []
@@ -71,6 +73,13 @@ def plot_u_theta(prob, params=None, M_t=1000, M_t_per_segment=1000, M_x=2000, t_
     # Define num_segments and bins for digitize
     num_segments = prob.num_segments if is_sequential else 1
     time_bins = prob.seq_T if is_sequential else jnp.array([t_min, t_max + 1e-6])
+    if is_3d and file_path is not None:
+        data = np.load(file_path)
+        times = data['times']
+        x_ref = data['x']
+        y_ref = data['y']
+        u_num = data['u']
+        # Assume grids match; otherwise, interpolation would be needed
     if not is_3d:
         if is_sequential:
             # Sequential case
@@ -202,21 +211,51 @@ def plot_u_theta(prob, params=None, M_t=1000, M_t_per_segment=1000, M_x=2000, t_
             y_range = y_max - y_min
             fig_width = 5 * x_range + 1.5 
             fig_height = 5 * y_range
-            fig, ax = plt.subplots(1, 1, figsize=(fig_width, fig_height))
+            has_ref = (u_ref is not None) or (file_path is not None)
+            if has_ref:
+                fig, axs = plt.subplots(1, 2, figsize=(2 * fig_width, fig_height))
+                ax_nn = axs[0]
+                ax_ref = axs[1]
+            else:
+                fig, ax_nn = plt.subplots(1, 1, figsize=(fig_width, fig_height))
+                ax_ref = None
+            # Plot NN
+            u_at_t_np = np.array(u_at_t)
+            if has_ref:
+                if u_ref is not None:
+                    xx, yy = np.meshgrid(np.array(x_grid), np.array(y_grid), indexing='ij')
+                    u_ref_at_t = u_ref(t_val*jnp.ones_like(xx), xx, yy)
+                else:
+                    idx = np.argmin(np.abs(times - t_val))
+                    u_ref_at_t = u_num[idx]
+                min_u = min(float(np.min(u_at_t_np)), float(np.min(u_ref_at_t)))
+                max_u = max(float(np.max(u_at_t_np)), float(np.max(u_ref_at_t)))
+                pcm_nn = ax_nn.pcolormesh(x_grid, y_grid, u_at_t_np.T, shading='nearest', cmap='viridis', vmin=min_u, vmax=max_u)
+                # Plot ref
+                pcm_ref = ax_ref.pcolormesh(x_grid, y_grid, u_ref_at_t.T, shading='nearest', cmap='viridis', vmin=min_u, vmax=max_u)
+                pcm_ref.set_rasterized(True)
+                cbar_ref = fig.colorbar(pcm_ref, ax=ax_ref)
+                cbar_ref.ax.tick_params(labelsize=fontsize)
+                ax_ref.set_xlabel('x', fontsize=fontsize)
+                ax_ref.set_ylabel('y', fontsize=fontsize)
+                ax_ref.tick_params(labelsize=fontsize)
+                ax_ref.set_title(f'Ref at t = {t_val:.2f}', fontsize=fontsize)
+            else:
+                pcm_nn = ax_nn.pcolormesh(x_grid, y_grid, u_at_t_np.T, shading='nearest', cmap='viridis')
+            pcm_nn.set_rasterized(True)
+            cbar_nn = fig.colorbar(pcm_nn, ax=ax_nn)
+            cbar_nn.ax.tick_params(labelsize=fontsize)
+            ax_nn.set_xlabel('x', fontsize=fontsize)
+            ax_nn.set_ylabel('y', fontsize=fontsize)
+            ax_nn.tick_params(labelsize=fontsize)
+            ax_nn.set_title(f'NN at t = {t_val:.2f}', fontsize=fontsize)
         else:
             fig, ax = plt.subplots(1, 1, figsize=(10, 4))
-        if is_3d:
-            pcm = ax.pcolormesh(x_grid, y_grid, u_at_t.T, shading='nearest', cmap='viridis')
-            pcm.set_rasterized(True)
-            cbar = fig.colorbar(pcm, ax=ax)
-            cbar.ax.tick_params(labelsize=fontsize)
-            ax.set_ylabel('y', fontsize=fontsize)
-        else:
             ax.plot(x_grid, u_at_t)
+            ax.set_xlabel('x', fontsize=fontsize)
             ax.set_ylabel('$u_\\theta(t, x)$', fontsize=fontsize)
-        ax.set_xlabel('x', fontsize=fontsize)
-        ax.tick_params(labelsize=fontsize)
-        ax.set_title(f'Neural Network Function at t = {t_val:.2f}', fontsize=fontsize)
+            ax.tick_params(labelsize=fontsize)
+            ax.set_title(f'Neural Network Function at t = {t_val:.2f}', fontsize=fontsize)
         plt.tight_layout()
         plt.show()
 
