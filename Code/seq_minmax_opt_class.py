@@ -23,7 +23,7 @@ class SeqMinMaxOptProb:
                  L1reg=0, sampling_method='uniform', notes='', pre_epochs=1000, nu=0.01/np.pi,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  res=None, loss_type='interior',  k=0, use_a=True, f_plot=1000, plt_err_dist=False, plt_mesh=False,
-                 partition='tri',
+                 partition='tri', u_ref=None,
                  M_t=1000, M_x=2000, set_wandb=False):
         """
         Initialize the sequential training class.
@@ -103,6 +103,8 @@ class SeqMinMaxOptProb:
         elif self.input_dim == 3:
             self.run_name = f"({total_t_max:.1f}-{total_t_min:.1f})/{num_segments}_Nt{N_t}_Nx{N_x}_Ny{N_y}_lrs{init_lrs[0]}_eps{grade_epochs[0]}_sig{sigma}_Np{N_perturb}_gam{gamma}_L1reg{L1reg}_sd{seed}"
         self.project = project
+        self.u_ref = u_ref,
+
         if self.set_wandb:
             wandb.init(project=self.project, 
                        name=self.run_name,
@@ -170,27 +172,28 @@ class SeqMinMaxOptProb:
                 init_lr_stage2=self.init_lr_stage2, epoch_stage2=epoch_stage2, decay_rate_stage2=self.decay_rate_stage2,
                 f_adaptive_weight=self.f_adaptive_weight, f_opt_kh=self.f_opt_kh, res=self.res, 
                 loss_type=self.loss_type, k=self.k, use_a=self.use_a, 
-                f_plot=self.f_plot, plt_err_dist=self.plt_err_dist, plt_mesh=self.plt_mesh, partition=self.partition, M_t=self.M_t, M_x=self.M_x,
-                seq_train=True, set_wandb=self.set_wandb,
+                f_plot=self.f_plot, plt_err_dist=self.plt_err_dist, plt_mesh=self.plt_mesh, partition=self.partition, u_ref=self.u_ref,
+                M_t=self.M_t, M_x=self.M_x, seq_train=True, set_wandb=self.set_wandb,
             )
              # Store the segment and update previous_params with the trained parameters
             self.segments.append(segment)
 
             # Plot before training
-            print(f"\nPlotting before training segment [{t_min:.4f}, {t_max:.4f}]")
-            plot_u_theta(
-                prob=segment,
-                M_t=self.M_t,
-                M_x=self.M_x,
-                t_min=t_min,
-                t_max=t_max,
-                x_min=self.x_min,
-                x_max=self.x_max,
-                y_min=self.y_min if self.input_dim == 3 else None,
-                y_max=self.y_max if self.input_dim == 3 else None,
-                ts=jnp.linspace(t_min, t_max, 2) if self.input_dim == 3 else None,
-                upload_fig=False
-            )
+            # print(f"\nPlotting before training segment [{t_min:.4f}, {t_max:.4f}]")
+            # plot_u_theta(
+            #     prob=segment,
+            #     M_t=self.M_t,
+            #     M_x=self.M_x,
+            #     t_min=t_min,
+            #     t_max=t_max,
+            #     x_min=self.x_min,
+            #     x_max=self.x_max,
+            #     y_min=self.y_min if self.input_dim == 3 else None,
+            #     y_max=self.y_max if self.input_dim == 3 else None,
+            #     ts=jnp.linspace(t_min, t_max, 2) if self.input_dim == 3 else None,
+            #     u_ref=self.u_ref if self.input_dim == 3 else None,
+            #     upload_fig=False
+            # )
 
             # Train the segment
             print(f"\nTraining segment [{t_min:.4f}, {t_max:.4f}]")
@@ -210,6 +213,7 @@ class SeqMinMaxOptProb:
                 y_min=self.y_min if self.input_dim == 3 else None,
                 y_max=self.y_max if self.input_dim == 3 else None,
                 ts=jnp.linspace(t_min, t_max, 2) if self.input_dim == 3 else None,
+                u_ref=self.u_ref if self.input_dim == 3 else None,
                 upload_fig=self.set_wandb
             )
 

@@ -33,7 +33,7 @@ class MinMaxOptProb2D:
                  L1reg=0, sampling_method='uniform', notes='', pre_epochs=1000, nu=0.01/np.pi,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  res=None, loss_type='interior', k=0, use_a=True, M_t = 1000, M_x = 1000, f_plot=1000, plt_err_dist=False, plt_mesh=False,
-                 partition='tri',
+                 partition='tri', u_ref=None,
                  seq_train=False, set_wandb=False):
         self.input_dim = input_dim
         self.p_dof = self.input_dim + 1
@@ -175,6 +175,7 @@ class MinMaxOptProb2D:
             self.partition = 'tri'  # For normal sampling, we use triangular partitioning
             print(f"Using triangular partitioning for normal sampling method.")
         
+        self.u_ref = u_ref  # Reference solution for error calculation, if provided
         if not self.seq_train and self.set_wandb:
             wandb.init(project=self.project, name=self.run_name, notes=self.notes,
                        config={
@@ -466,6 +467,7 @@ class MinMaxOptProb2D:
                         y_min=self.y_min if self.input_dim == 3 else None,
                         y_max=self.y_max if self.input_dim == 3 else None,
                         ts=jnp.linspace(self.t_min, self.t_max, 2) if self.input_dim == 3 else None,
+                        u_ref=self.u_ref if self.input_dim == 3 else None,
                         upload_fig=self.set_wandb
                         )
                     if self.plt_err_dist or self.plt_mesh:
