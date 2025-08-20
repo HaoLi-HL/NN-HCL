@@ -260,6 +260,7 @@ class MinMaxOptProb2D:
             quad_weights = self.pwp.quad_weights_parti
             avg_vals = jnp.einsum('ij,ij->i', u_values_all, quad_weights)/self.elem_meas
             init_coeffs_all = jnp.hstack([avg_vals[..., None] , jnp.zeros((Nt, self.p_dof - 1))])
+            print(f"init_coeffs_all.shape: {init_coeffs_all.shape}, avg_vals.shape: {avg_vals.shape}")
             perturbations_all = self.sigma * jax.random.uniform(key, (self.N_perturb, self.p_dof), minval=-1, maxval=1)
         
         perturbed_coeffs_all = init_coeffs_all[:, None, :] + perturbations_all[None, :, :]
@@ -346,29 +347,31 @@ class MinMaxOptProb2D:
         params = optax.apply_updates(params, updates)
         return all_losses[0], all_losses[1], params, opt_state
 
-    def pre_train_to_ic(self, pre_epochs=0, pre_lr=1e-3, N_pre=100000):
+    def pre_train_to_ic(self, pre_epochs=0, pre_lr=1e-3):
         if pre_epochs <= 0 and self.pre_epochs <= 0:
             print("Skipping pre-training as pre_epochs is set to 0.")
             return
         print("\nPre-training the network to fit v(t, x) = u0(x)")
+        pre_epochs = pre_epochs if pre_epochs > 0 else self.pre_epochs
+        quad_points = self.pwp.quad_points
+        quad_weights = self.pwp.quad_weights
         # Generate pre-training points
-        self.key, subkey = jax.random.split(self.key)
         if self.input_dim == 2:
-            tx_pre = jax.random.uniform(subkey, (N_pre, 2), minval=self.lb, maxval=self.ub)
-            y_pre = self.u0(tx_pre[:, 1])
+            y_pre = self.u0(quad_points[:, 1])
         elif self.input_dim == 3:
-            tx_pre = jax.random.uniform(subkey, (N_pre, 3), minval=self.lb, maxval=self.ub)
-            y_pre = self.u0(tx_pre[:, 1], tx_pre[:, 2])
+            y_pre = self.u0(quad_points[:, 1], quad_points[:, 2])
 
         # Collect all parameters
         params = self.model.mlps[0].params
         # lr = optax.schedules.cosine_decay_schedule(init_value=pre_lr, decay_steps=pre_epochs)
         optimizer = optax.adam(pre_lr)
         opt_state = optimizer.init(params)
+        net_u = lambda params, quad_points: self.model.forward_with_params(params, quad_points, grade_idx=0)
+        u_eval = jit(vmap(net_u, in_axes = (None, 0)))
 
         def pre_loss(params):
-            u_pred = vmap(lambda tx: self.model.forward_with_params(params, tx, grade_idx=0))(tx_pre).squeeze()
-            return jnp.mean((u_pred - y_pre)**2)
+            u_pred = u_eval(params, quad_points)
+            return jnp.dot(quad_weights, (u_pred - y_pre)**2)
 
         pre_loss_grad = jax.value_and_grad(pre_loss)
 
@@ -389,14 +392,13 @@ class MinMaxOptProb2D:
         quad_weights = self.pwp.quad_weights
         u_quad = self.u_eval(params, quad_points)
         grad_u_tx = self.grad_u(params, quad_points)
+        lap = self.laplacian(params, quad_points)
         if self.input_dim == 2:
             u_t, u_x = grad_u_tx[:, 0], grad_u_tx[:, 1]
-            residual = self.res(u_quad, u_t, u_x)
+            residual = self.res(u_quad, u_t, u_x) - self.nu*lap
         elif self.input_dim == 3:
             u_t, u_x, u_y = grad_u_tx[:, 0], grad_u_tx[:, 1], grad_u_tx[:, 2]
-            residual = self.res(u_quad, u_t, u_x, u_y)
-        lap = self.laplacian(params, quad_points)
-        residual = self.res(u_quad, u_t, u_x, u_y) - self.nu*lap
+            residual = self.res(u_quad, u_t, u_x, u_y) - self.nu*lap
         interior_loss = jnp.dot(quad_weights, residual**2)
         return interior_loss
     
