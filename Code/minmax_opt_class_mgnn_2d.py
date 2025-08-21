@@ -297,7 +297,7 @@ class MinMaxOptProb2D:
                 )
         # Compute k_h for the current element
         # k_h_quad_all = p_coeffs_all[:, 1:]@quad_points.T + p_coeffs_all[:, 0][:, None] # This code looks concise but it costs more memory.
-        print(f"k_h_quad_all.shape: {k_h_quad_all.shape}, u_quad.shape: {u_quad.shape}, residual.shape: {residual.shape}")
+        # print(f"k_h_quad_all.shape: {k_h_quad_all.shape}, u_quad.shape: {u_quad.shape}, residual.shape: {residual.shape}")
         loss = jnp.dot(jnp.sign(u_quad[None, :] - k_h_quad_all), (quad_weights*residual))
         # Compute absolute loss, which is the L1 norm of the residual. Just for comparison and debugging. We do not use it in the optimization.
         loss_l1 = jnp.dot(jnp.abs(residual), quad_weights)
