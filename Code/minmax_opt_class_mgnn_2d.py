@@ -297,10 +297,10 @@ class MinMaxOptProb2D:
                 )
         # Compute k_h for the current element
         # k_h_quad_all = p_coeffs_all[:, 1:]@quad_points.T + p_coeffs_all[:, 0][:, None] # This code looks concise but it costs more memory.
-        integrand_all = residual[None, :] * jnp.sign(u_quad[None, :] - k_h_quad_all)
-        loss = jnp.sum(quad_weights[None, :] * integrand_all, axis=1)
+        print(f"k_h_quad_all.shape: {k_h_quad_all.shape}, u_quad.shape: {u_quad.shape}, residual.shape: {residual.shape}")
+        loss = jnp.dot(jnp.sign(u_quad[None, :] - k_h_quad_all), (quad_weights*residual))
         # Compute absolute loss, which is the L1 norm of the residual. Just for comparison and debugging. We do not use it in the optimization.
-        loss_l1 = jnp.abs(residual)@quad_weights
+        loss_l1 = jnp.dot(jnp.abs(residual), quad_weights)
         return loss, loss_l1
     
 
@@ -310,19 +310,20 @@ class MinMaxOptProb2D:
         u_quad = self.u_eval(params, quad_points)
         grad_u_tx = self.grad_u(params, quad_points)
         # print(f"grad_u_tx.shape: {grad_u_tx.shape}", f"u_quad.shape: {u_quad.shape}")
+        p_coeffs_quad = self.pwp.coeffs[self.pwp.element_indices]
         if self.input_dim == 2:
             u_t, u_x = grad_u_tx[:, 0], grad_u_tx[:, 1]
             residual = self.res(u_quad, u_t, u_x)
+            k_h_quad = p_coeffs_quad[:, 0] + p_coeffs_quad[:, 1] * quad_points[:, 0] + p_coeffs_quad[:, 2] * quad_points[:, 1]
         elif self.input_dim == 3:
             u_t, u_x, u_y = grad_u_tx[:, 0], grad_u_tx[:, 1], grad_u_tx[:, 2]
             residual = self.res(u_quad, u_t, u_x, u_y)
-        p_coeffs_quad = self.pwp.coeffs[self.pwp.element_indices]
-        k_h_quad = jnp.einsum('ij, ij->i', p_coeffs_quad[:, 1:], quad_points) + p_coeffs_quad[:, 0]
+            k_h_quad = p_coeffs_quad[:, 0] + p_coeffs_quad[:, 1] * quad_points[:, 0] + p_coeffs_quad[:, 2] * quad_points[:, 1] + p_coeffs_quad[:, 3] * quad_points[:, 2]
+        
+        # k_h_quad = jnp.einsum('ij, ij->i', p_coeffs_quad[:, 1:], quad_points) + p_coeffs_quad[:, 0]
         integrand = (1 - self.L1reg) * residual * jnp.sign(u_quad - k_h_quad)
-
         if self.L1reg > 1e-6:
             integrand += self.L1reg * jnp.abs(self.hx * residual)
-            
         interior_loss = jnp.dot(quad_weights, integrand)
         total_loss = interior_loss
         return total_loss
@@ -342,8 +343,8 @@ class MinMaxOptProb2D:
     def loss_fn_lambda(self, params):
         loss_ic = self.loss_fn_ic(params)
         loss_bc = self.loss_fn_bc(params)
-        # loss_eqn = self.loss_fn_eqn(params)
-        loss_eqn = 0
+        loss_eqn = self.loss_fn_eqn(params)
+        # loss_eqn = 0
         total_loss = self.lambda_eqn * loss_eqn + self.lambda_ic * loss_ic + self.lambda_bc * loss_bc
         return total_loss, (loss_eqn, loss_ic + loss_bc)
     
