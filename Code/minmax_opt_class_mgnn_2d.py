@@ -33,17 +33,23 @@ class MinMaxOptProb2D:
                  L1reg=0, sampling_method='uniform', notes='', pre_epochs=1000, nu=0.01/np.pi,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  res=None, loss_type='interior', k=0, use_a=True, M_t = 1000, M_x = 1000, f_plot=1000, plt_err_dist=False, plt_mesh=False,
-                 partition='tri', u_ref=None,
+                 partition='tri', p_dof=None, dg_type='P1', u_ref=None,
                  seq_train=False, set_wandb=False):
         self.input_dim = input_dim
-        self.p_dof = self.input_dim + 1
-
+        
         self.seq_train = seq_train  # Sequential training flag
         self.set_wandb = set_wandb
         # if self.seq_train is True, then we will not create a new wandb run but just use the existing one.
         # if self.seq_train is False and self.set_wandb is True, then we will create a new wandb run.
 
         self.partition = partition  # 'tri' or 'rect' or 'hex'
+        self.dg_type = dg_type  # 'P1' or 'Q1' only used when partition is 'rect' or 'hex'
+        self.p_dof = p_dof  # number of dof per element, if None, will be set to input_dim + 1 for 'P1' and 2**input_dim for 'Q1'
+        if self.p_dof is None:
+            if self.dg_type is 'P1':
+                self.p_dof = self.input_dim + 1
+            elif self.dg_type is 'Q1':
+                self.p_dof = 2 ** self.input_dim
         
         self.ht = (t_max - t_min) / N_t
         self.hx = (x_max - x_min) / N_x
@@ -281,20 +287,56 @@ class MinMaxOptProb2D:
         if self.input_dim == 2:
             u_t, u_x = grad_u_tx[:, 0], grad_u_tx[:, 1]
             residual = self.res(u_quad, u_t, u_x).flatten()
-            k_h_quad_all = (
-                p_coeffs_all[:, 0][:, None] + 
-                p_coeffs_all[:, 1][:, None] * quad_points[:, 0] + 
-                p_coeffs_all[:, 2][:, None] * quad_points[:, 1]
-                )
+            if self.dg_type == 'P1':
+                k_h_quad_all = (
+                    p_coeffs_all[:, 0][:, None] + 
+                    p_coeffs_all[:, 1][:, None] * quad_points[:, 0] + 
+                    p_coeffs_all[:, 2][:, None] * quad_points[:, 1]
+                    )
+            elif self.dg_type == 'Q1':
+                # k_h_quad_all = (
+                #     p_coeffs_all[:, 0][:, None] + 
+                #     p_coeffs_all[:, 1][:, None] * quad_points[:, 0] + 
+                #     p_coeffs_all[:, 2][:, None] * quad_points[:, 1] + 
+                #     p_coeffs_all[:, 3][:, None] * quad_points[:, 0] * quad_points[:, 1]
+                #     )
+                partition = self.pwp.partitions[parti_idx]
+                t_low, x_low = partition[0]
+                t_high, x_high = partition[3]
+                local_t = (quad_points[:, 0] - t_low) / (t_high - t_low)
+                local_x = (quad_points[:, 1] - x_low) / (x_high - x_low)
+                t_m = 1 - local_t
+                t_p = local_t
+                x_m = 1 - local_x
+                x_p = local_x
+                k_h_quad_all = (
+                    p_coeffs_all[:, 0][:, None] * (1 - local_t) * (1 - local_x)  + 
+                    p_coeffs_all[:, 1][:, None] * (1 - local_t) * local_x  + 
+                    p_coeffs_all[:, 2][:, None] * local_t * (1 - local_x)  + 
+                    p_coeffs_all[:, 3][:, None] * local_t * local_x
+                    )
+
         elif self.input_dim == 3:
             u_t, u_x, u_y = grad_u_tx[:, 0], grad_u_tx[:, 1], grad_u_tx[:, 2]
             residual = self.res(u_quad, u_t, u_x, u_y).flatten()
-            k_h_quad_all = (
-                p_coeffs_all[:, 0][:, None] + 
-                p_coeffs_all[:, 1][:, None] * quad_points[:, 0] + 
-                p_coeffs_all[:, 2][:, None] * quad_points[:, 1] + 
-                p_coeffs_all[:, 3][:, None] * quad_points[:, 2]
-                )
+            if self.dg_type == 'P1':
+                k_h_quad_all = (
+                    p_coeffs_all[:, 0][:, None] + 
+                    p_coeffs_all[:, 1][:, None] * quad_points[:, 0] + 
+                    p_coeffs_all[:, 2][:, None] * quad_points[:, 1] + 
+                    p_coeffs_all[:, 3][:, None] * quad_points[:, 2]
+                    )
+            elif self.dg_type == 'Q1':
+                k_h_quad_all = (
+                    p_coeffs_all[:, 0][:, None] + 
+                    p_coeffs_all[:, 1][:, None] * quad_points[:, 0] + 
+                    p_coeffs_all[:, 2][:, None] * quad_points[:, 1] + 
+                    p_coeffs_all[:, 3][:, None] * quad_points[:, 2] + 
+                    p_coeffs_all[:, 4][:, None] * quad_points[:, 0] * quad_points[:, 1] + 
+                    p_coeffs_all[:, 5][:, None] * quad_points[:, 0] * quad_points[:, 2] + 
+                    p_coeffs_all[:, 6][:, None] * quad_points[:, 1] * quad_points[:, 2] + 
+                    p_coeffs_all[:, 7][:, None] * quad_points[:, 0] * quad_points[:, 1] * quad_points[:, 2]
+                    )
         # Compute k_h for the current element
         # k_h_quad_all = p_coeffs_all[:, 1:]@quad_points.T + p_coeffs_all[:, 0][:, None] # This code looks concise but it costs more memory.
         # print(f"k_h_quad_all.shape: {k_h_quad_all.shape}, u_quad.shape: {u_quad.shape}, residual.shape: {residual.shape}")

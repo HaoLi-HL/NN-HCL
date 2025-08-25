@@ -49,8 +49,8 @@ class PiecewiseLinearPolynomialsRect:
                 rectangles.append(jnp.array([
                     [self.t_min + i * tau, self.x_min + j * hx],       # Bottom-left
                     [self.t_min + (i + 1) * tau, self.x_min + j * hx], # Top-left
+                    [self.t_min + i * tau, self.x_min + (j + 1) * hx],  # Bottom-right
                     [self.t_min + (i + 1) * tau, self.x_min + (j + 1) * hx], # Top-right
-                    [self.t_min + i * tau, self.x_min + (j + 1) * hx]  # Bottom-right
                 ]))
         return jnp.array(rectangles)
 
@@ -80,7 +80,7 @@ class PiecewiseLinearPolynomialsRect:
         # Function to map [-1,1]x[-1,1] to rectangle [t_low, t_high]x[x_low, x_high]
         def map_to_rect(rect):
             t_low, x_low = rect[0]
-            t_high, x_high = rect[2]
+            t_high, x_high = rect[3]
             t_scale = (t_high - t_low) / 2
             x_scale = (x_high - x_low) / 2
             t_center = (t_high + t_low) / 2
@@ -129,10 +129,10 @@ class PiecewiseLinearPolynomialsRect:
         edge_quadrature_vmap = vmap(edge_quadrature, in_axes=(0, 0))
 
         # Compute quadrature for each set of edges for all rectangles
-        points_bottom, weights_bottom = edge_quadrature_vmap(self.partitions[:, 0], self.partitions[:, 3])  # Bottom: 0-3
-        points_top, weights_top = edge_quadrature_vmap(self.partitions[:, 1], self.partitions[:, 2])  # Top: 1-2
+        points_bottom, weights_bottom = edge_quadrature_vmap(self.partitions[:, 0], self.partitions[:, 2])  # Bottom: 0-2
+        points_top, weights_top = edge_quadrature_vmap(self.partitions[:, 1], self.partitions[:, 3])  # Top: 1-3
         points_left, weights_left = edge_quadrature_vmap(self.partitions[:, 0], self.partitions[:, 1])  # Left: 0-1
-        points_right, weights_right = edge_quadrature_vmap(self.partitions[:, 3], self.partitions[:, 2])  # Right: 3-2
+        points_right, weights_right = edge_quadrature_vmap(self.partitions[:, 2], self.partitions[:, 3])  # Right: 2-3
 
         # Concatenate points and weights for all four edges per rectangle
         bdry_points_rect = jnp.concatenate([points_bottom, points_top, points_left, points_right], axis=1)  # Shape: (N_elements, 4*n, 2)

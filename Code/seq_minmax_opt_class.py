@@ -23,7 +23,7 @@ class SeqMinMaxOptProb:
                  L1reg=0, sampling_method='uniform', notes='', pre_epochs=1000, nu=0.01/np.pi,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  res=None, loss_type='interior',  k=0, use_a=True, f_plot=1000, plt_err_dist=False, plt_mesh=False,
-                 partition='tri', u_ref=None,
+                 partition='tri', dg_type='P1',u_ref=None,
                  M_t=1000, M_x=2000, set_wandb=False):
         """
         Initialize the sequential training class.
@@ -39,6 +39,15 @@ class SeqMinMaxOptProb:
         self.input_dim = input_dim
         self.set_wandb = set_wandb
         self.partition = partition
+        self.dg_type = dg_type  # 'P1' or 'Q1' only used when partition is 'rect' or 'hex'
+        if self.partition in ['rect', 'hex'] and self.dg_type is None:
+            self.dg_type = 'Q1'
+        if self.dg_type is 'Q1' and self.partition in ['tri']:
+            raise ValueError("dg_type 'Q1' is only applicable for 'rect' or 'hex' partitions.")
+        if self.dg_type is 'P1':
+            self.p_dof = self.input_dim + 1
+        elif self.dg_type is 'Q1':
+            self.p_dof = 2 ** self.input_dim
         
         self.total_t_min = total_t_min
         self.total_t_max = total_t_max
@@ -172,8 +181,8 @@ class SeqMinMaxOptProb:
                 init_lr_stage2=self.init_lr_stage2, epoch_stage2=epoch_stage2, decay_rate_stage2=self.decay_rate_stage2,
                 f_adaptive_weight=self.f_adaptive_weight, f_opt_kh=self.f_opt_kh, res=self.res, 
                 loss_type=self.loss_type, k=self.k, use_a=self.use_a, 
-                f_plot=self.f_plot, plt_err_dist=self.plt_err_dist, plt_mesh=self.plt_mesh, partition=self.partition, u_ref=self.u_ref,
-                M_t=self.M_t, M_x=self.M_x, seq_train=True, set_wandb=self.set_wandb,
+                f_plot=self.f_plot, plt_err_dist=self.plt_err_dist, plt_mesh=self.plt_mesh, partition=self.partition, p_dof=self.p_dof, dg_type=self.dg_type,
+                u_ref=self.u_ref, M_t=self.M_t, M_x=self.M_x, seq_train=True, set_wandb=self.set_wandb,
             )
              # Store the segment and update previous_params with the trained parameters
             self.segments.append(segment)
