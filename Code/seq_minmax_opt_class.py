@@ -42,11 +42,11 @@ class SeqMinMaxOptProb:
         self.dg_type = dg_type  # 'P1' or 'Q1' only used when partition is 'rect' or 'hex'
         if self.partition in ['rect', 'hex'] and self.dg_type is None:
             self.dg_type = 'Q1'
-        if self.dg_type is 'Q1' and self.partition in ['tri']:
+        if self.dg_type == 'Q1' and self.partition in ['tri']:
             raise ValueError("dg_type 'Q1' is only applicable for 'rect' or 'hex' partitions.")
-        if self.dg_type is 'P1':
+        if self.dg_type == 'P1':
             self.p_dof = self.input_dim + 1
-        elif self.dg_type is 'Q1':
+        elif self.dg_type == 'Q1':
             self.p_dof = 2 ** self.input_dim
         
         self.total_t_min = total_t_min

@@ -46,9 +46,9 @@ class MinMaxOptProb2D:
         self.dg_type = dg_type  # 'P1' or 'Q1' only used when partition is 'rect' or 'hex'
         self.p_dof = p_dof  # number of dof per element, if None, will be set to input_dim + 1 for 'P1' and 2**input_dim for 'Q1'
         if self.p_dof is None:
-            if self.dg_type is 'P1':
+            if self.dg_type == 'P1':
                 self.p_dof = self.input_dim + 1
-            elif self.dg_type is 'Q1':
+            elif self.dg_type == 'Q1':
                 self.p_dof = 2 ** self.input_dim
         
         self.ht = (t_max - t_min) / N_t
