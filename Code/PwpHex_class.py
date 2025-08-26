@@ -40,16 +40,16 @@ class PiecewiseLinearPolynomialsHex:
 
     def _generate_hexahedra(self):
         """Generate the hexahedra for the mesh with custom ranges."""
-        self.tau = (self.t_max - self.t_min) / self.N_t
+        self.ht = (self.t_max - self.t_min) / self.N_t
         self.hx = (self.x_max - self.x_min) / self.N_x
         self.hy = (self.y_max - self.y_min) / self.N_y
-        t_starts = jnp.linspace(self.t_min, self.t_max - self.tau, self.N_t)
+        t_starts = jnp.linspace(self.t_min, self.t_max - self.ht, self.N_t)
         x_starts = jnp.linspace(self.x_min, self.x_max - self.hx, self.N_x)
         y_starts = jnp.linspace(self.y_min, self.y_max - self.hy, self.N_y)
         tl, xl, yl = jnp.meshgrid(t_starts, x_starts, y_starts, indexing='ij')
         # Define the 8 vertices for each hexahedron using binary offsets
         offsets_bin = jnp.array([[int(b) for b in f'{i:03b}'] for i in range(8)], dtype=jnp.float32)  # (8,3) binary 000 to 111
-        deltas = jnp.array([self.tau, self.hx, self.hy])
+        deltas = jnp.array([self.ht, self.hx, self.hy])
         offsets = offsets_bin * deltas  # (8,3)
         lowers = jnp.stack([tl.ravel(), xl.ravel(), yl.ravel()], axis=1)[:, None, :]  # (N_elements, 1, 3)
         partitions = lowers + offsets[None, :, :]  # (N_elements, 8, 3)

@@ -41,18 +41,19 @@ class PiecewiseLinearPolynomialsRect:
 
     def _generate_rectangles(self):
         """Generate the rectangles for the mesh with custom ranges."""
-        tau = (self.t_max - self.t_min) / self.N_t  # Step size along t
-        hx = (self.x_max - self.x_min) / self.N_x   # Step size along x
-        rectangles = []
-        for i in range(self.N_t):
-            for j in range(self.N_x):
-                rectangles.append(jnp.array([
-                    [self.t_min + i * tau, self.x_min + j * hx],       # Bottom-left
-                    [self.t_min + (i + 1) * tau, self.x_min + j * hx], # Top-left
-                    [self.t_min + i * tau, self.x_min + (j + 1) * hx],  # Bottom-right
-                    [self.t_min + (i + 1) * tau, self.x_min + (j + 1) * hx], # Top-right
-                ]))
-        return jnp.array(rectangles)
+        self.ht = (self.t_max - self.t_min) / self.N_t  # Step size along t
+        self.hx = (self.x_max - self.x_min) / self.N_x   # Step size along x
+
+        t_starts = jnp.linspace(self.t_min, self.t_max - self.ht, self.N_t)
+        x_starts = jnp.linspace(self.x_min, self.x_max - self.hx, self.N_x)
+        tl, xl = jnp.meshgrid(t_starts, x_starts)
+        # Define the 4 vertices for each hexahedron using binary offsets
+        offsets_bin = jnp.array([[int(b) for b in f'{i:02b}'] for i in range(4)], dtype=jnp.float32)  # (4, 2) binary 00 to 11
+        deltas = jnp.array([self.ht, self.hx])
+        offsets = offsets_bin * deltas  # (4,2)
+        lowers = jnp.stack([tl.ravel(), xl.ravel()], axis=1)[:, None, :]  # (N_elements, 1, 2)
+        partitions = lowers + offsets[None, :, :]  # (N_elements, 4, 2)
+        return partitions
 
     def _setup_quadrature(self):
         """

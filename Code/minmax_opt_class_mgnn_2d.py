@@ -170,9 +170,9 @@ class MinMaxOptProb2D:
         self.plt_mesh = plt_mesh
         
         if self.partition == 'tri':
-            self.elem_meas = 0.5*(self.ht*self.hx)
+            self.elem_meas = 0.5 * (self.ht * self.hx)
         elif self.partition == 'rect':
-            self.elem_meas = self.ht*self.hx
+            self.elem_meas = self.ht * self.hx
         elif self.partition == 'hex':
             self.elem_meas = self.ht * self.hx * self.hy
         else:
@@ -204,6 +204,8 @@ class MinMaxOptProb2D:
                            "L1reg": L1reg
                        })
         self.gen_funcs()
+        self.vmap_loss_fn_elem_int_per_elem = vmap(self.loss_fn_elem_int_per_elem, in_axes=(0, 0, None))
+        print(f"Partition type: {self.partition}, dg_type: {self.dg_type}, p_dof: {self.p_dof}")
 
     def gen_ibc(self):
         if self.input_dim == 2:
@@ -265,12 +267,15 @@ class MinMaxOptProb2D:
             u_values_all = self.u_eval(params, quad_points)
             quad_weights = self.pwp.quad_weights_parti
             avg_vals = jnp.einsum('ij,ij->i', u_values_all, quad_weights)/self.elem_meas
-            init_coeffs_all = jnp.hstack([avg_vals[..., None] , jnp.zeros((Nt, self.p_dof - 1))])
+            if self.dg_type == 'P1':
+                init_coeffs_all = jnp.hstack([avg_vals[..., None] , jnp.zeros((Nt, self.p_dof - 1))])
+            elif self.dg_type == 'Q1':
+                init_coeffs_all = jnp.tile(avg_vals[..., None], (1, self.p_dof))
             # print(f"init_coeffs_all.shape: {init_coeffs_all.shape}, avg_vals.shape: {avg_vals.shape}")
             perturbations_all = self.sigma * jax.random.uniform(key, (self.N_perturb, self.p_dof), minval=-1, maxval=1)
         
         perturbed_coeffs_all = init_coeffs_all[:, None, :] + perturbations_all[None, :, :]
-        loss_all_test, loss_l1_all = vmap(self.loss_fn_elem_int_per_elem, in_axes=(0, 0, None))(jnp.arange(Nt), perturbed_coeffs_all, params)
+        loss_all_test, loss_l1_all = self.vmap_loss_fn_elem_int_per_elem(jnp.arange(Nt), perturbed_coeffs_all, params)
         best_indices = jnp.argmax(loss_all_test, axis=1)
         loss_each_elem = loss_all_test[jnp.arange(Nt), best_indices]
         loss_eqn = jnp.sum(loss_each_elem)
@@ -305,10 +310,6 @@ class MinMaxOptProb2D:
                 t_high, x_high = partition[3]
                 local_t = (quad_points[:, 0] - t_low) / (t_high - t_low)
                 local_x = (quad_points[:, 1] - x_low) / (x_high - x_low)
-                t_m = 1 - local_t
-                t_p = local_t
-                x_m = 1 - local_x
-                x_p = local_x
                 k_h_quad_all = (
                     p_coeffs_all[:, 0][:, None] * (1 - local_t) * (1 - local_x)  + 
                     p_coeffs_all[:, 1][:, None] * (1 - local_t) * local_x  + 
@@ -327,15 +328,21 @@ class MinMaxOptProb2D:
                     p_coeffs_all[:, 3][:, None] * quad_points[:, 2]
                     )
             elif self.dg_type == 'Q1':
+                partition = self.pwp.partitions[parti_idx]
+                t_low, x_low, y_low = partition[0]
+                t_high, x_high, y_high = partition[-1]
+                local_t = (quad_points[:, 0] - t_low) / (t_high - t_low)
+                local_x = (quad_points[:, 1] - x_low) / (x_high - x_low)
+                local_y = (quad_points[:, 2] - y_low) / (y_high - y_low)
                 k_h_quad_all = (
-                    p_coeffs_all[:, 0][:, None] + 
-                    p_coeffs_all[:, 1][:, None] * quad_points[:, 0] + 
-                    p_coeffs_all[:, 2][:, None] * quad_points[:, 1] + 
-                    p_coeffs_all[:, 3][:, None] * quad_points[:, 2] + 
-                    p_coeffs_all[:, 4][:, None] * quad_points[:, 0] * quad_points[:, 1] + 
-                    p_coeffs_all[:, 5][:, None] * quad_points[:, 0] * quad_points[:, 2] + 
-                    p_coeffs_all[:, 6][:, None] * quad_points[:, 1] * quad_points[:, 2] + 
-                    p_coeffs_all[:, 7][:, None] * quad_points[:, 0] * quad_points[:, 1] * quad_points[:, 2]
+                    p_coeffs_all[:, 0][:, None] * (1 - local_t) * (1 - local_x) * (1 - local_y) + 
+                    p_coeffs_all[:, 1][:, None] * (1 - local_t) * (1 - local_x) * local_y +
+                    p_coeffs_all[:, 2][:, None] * (1 - local_t) * local_x * (1 - local_y) + 
+                    p_coeffs_all[:, 3][:, None] * (1 - local_t) * local_x * local_y + 
+                    p_coeffs_all[:, 4][:, None] * local_t * (1 - local_x) * (1 - local_y) + 
+                    p_coeffs_all[:, 5][:, None] * local_t * (1 - local_x) * local_y + 
+                    p_coeffs_all[:, 6][:, None] * local_t * local_x * (1 - local_y) + 
+                    p_coeffs_all[:, 7][:, None] * local_t * local_x * local_y
                     )
         # Compute k_h for the current element
         # k_h_quad_all = p_coeffs_all[:, 1:]@quad_points.T + p_coeffs_all[:, 0][:, None] # This code looks concise but it costs more memory.
@@ -345,6 +352,21 @@ class MinMaxOptProb2D:
         loss_l1 = jnp.dot(jnp.abs(residual), quad_weights)
         return loss, loss_l1
     
+    
+    
+    # def loss_fn_elem_int(self, params):
+    #     p_coeffs = self.pwp.coeffs[:, None, :]  # (Nt, 1, p_dof)
+    #     Nt = self.pwp.N_elements
+    #     loss_all_elems, loss_l1_elems = self.vmap_loss_fn_elem_int_per_elem(jnp.arange(Nt), p_coeffs, params)
+    #     loss_eqn = jnp.sum(loss_all_elems)
+    #     # Compute absolute loss, which is the L1 norm of the residual. Just for comparison and debugging. We do not use it in the optimization.
+    #     # loss_l1 = jnp.sum(loss_l1_elems)
+    #     total_loss = (1 - self.L1reg) * loss_eqn
+    #     if self.L1reg > 1e-6: 
+    #         loss_l1 = jnp.sum(loss_l1_elems)
+    #         total_loss += self.L1reg *  self.hx * loss_l1
+    #     return total_loss
+
 
     def loss_fn_elem_int(self, params):
         quad_points = self.pwp.quad_points
@@ -356,11 +378,49 @@ class MinMaxOptProb2D:
         if self.input_dim == 2:
             u_t, u_x = grad_u_tx[:, 0], grad_u_tx[:, 1]
             residual = self.res(u_quad, u_t, u_x)
-            k_h_quad = p_coeffs_quad[:, 0] + p_coeffs_quad[:, 1] * quad_points[:, 0] + p_coeffs_quad[:, 2] * quad_points[:, 1]
+            if self.dg_type == 'P1':
+                k_h_quad = p_coeffs_quad[:, 0] + p_coeffs_quad[:, 1] * quad_points[:, 0] + p_coeffs_quad[:, 2] * quad_points[:, 1]
+            elif self.dg_type == 'Q1':
+                partitions = self.pwp.partitions[self.pwp.element_indices]
+                t_low = partitions[:, 0, 0]
+                x_low = partitions[:, 0, 1]
+                t_high = partitions[:, -1, 0]
+                x_high = partitions[:, -1, 1]
+                local_t = (quad_points[:, 0] - t_low) / (t_high - t_low)
+                local_x = (quad_points[:, 1] - x_low) / (x_high - x_low)
+                k_h_quad = (
+                    p_coeffs_quad[:, 0] * (1 - local_t) * (1 - local_x)  + 
+                    p_coeffs_quad[:, 1] * (1 - local_t) * local_x  + 
+                    p_coeffs_quad[:, 2] * local_t * (1 - local_x)  + 
+                    p_coeffs_quad[:, 3] * local_t * local_x
+                    )
+
         elif self.input_dim == 3:
             u_t, u_x, u_y = grad_u_tx[:, 0], grad_u_tx[:, 1], grad_u_tx[:, 2]
             residual = self.res(u_quad, u_t, u_x, u_y)
-            k_h_quad = p_coeffs_quad[:, 0] + p_coeffs_quad[:, 1] * quad_points[:, 0] + p_coeffs_quad[:, 2] * quad_points[:, 1] + p_coeffs_quad[:, 3] * quad_points[:, 2]
+            if self.dg_type == 'P1':
+                k_h_quad = p_coeffs_quad[:, 0] + p_coeffs_quad[:, 1] * quad_points[:, 0] + p_coeffs_quad[:, 2] * quad_points[:, 1] + p_coeffs_quad[:, 3] * quad_points[:, 2]
+            elif self.dg_type == 'Q1':
+                partitions = self.pwp.partitions[self.pwp.element_indices]
+                t_low = partitions[:, 0, 0]
+                x_low = partitions[:, 0, 1]
+                y_low = partitions[:, 0, 2]
+                t_high = partitions[:, -1, 0]
+                x_high = partitions[:, -1, 1]
+                y_high = partitions[:, -1, 2]
+                local_t = (quad_points[:, 0] - t_low) / (t_high - t_low)
+                local_x = (quad_points[:, 1] - x_low) / (x_high - x_low)
+                local_y = (quad_points[:, 2] - y_low) / (y_high - y_low)
+                k_h_quad = (
+                    p_coeffs_quad[:, 0] * (1 - local_t) * (1 - local_x) * (1 - local_y) + 
+                    p_coeffs_quad[:, 1] * (1 - local_t) * (1 - local_x) * local_y +
+                    p_coeffs_quad[:, 2] * (1 - local_t) * local_x * (1 - local_y) + 
+                    p_coeffs_quad[:, 3] * (1 - local_t) * local_x * local_y + 
+                    p_coeffs_quad[:, 4] * local_t * (1 - local_x) * (1 - local_y) + 
+                    p_coeffs_quad[:, 5] * local_t * (1 - local_x) * local_y + 
+                    p_coeffs_quad[:, 6] * local_t * local_x * (1 - local_y) + 
+                    p_coeffs_quad[:, 7] * local_t * local_x * local_y
+                    )
         
         # k_h_quad = jnp.einsum('ij, ij->i', p_coeffs_quad[:, 1:], quad_points) + p_coeffs_quad[:, 0]
         integrand = (1 - self.L1reg) * residual * jnp.sign(u_quad - k_h_quad)
@@ -369,6 +429,7 @@ class MinMaxOptProb2D:
         interior_loss = jnp.dot(quad_weights, integrand)
         total_loss = interior_loss
         return total_loss
+
 
     def loss_fn_ic(self, params):
         return jnp.mean((self.u_eval(params, self.tx_t0) - self.u_t0)**2)
@@ -497,6 +558,7 @@ class MinMaxOptProb2D:
                 loss_eqn, loss_ibc, params, opt_state = self.train_step(params, optimizer, opt_state)
                 if iter % self.f_opt_kh == 0 and self.loss_type != 'pinn':
                     self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params, self.key)
+                loss_eqn = self.loss_fn_eqn(params)
                 self.loss_eqn_history[grade_idx].append(loss_eqn)
                 self.loss_bc_history[grade_idx].append(loss_ibc)
                 if iter >= monitor_start:

@@ -23,7 +23,7 @@ class SeqMinMaxOptProb:
                  L1reg=0, sampling_method='uniform', notes='', pre_epochs=1000, nu=0.01/np.pi,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  res=None, loss_type='interior',  k=0, use_a=True, f_plot=1000, plt_err_dist=False, plt_mesh=False,
-                 partition='tri', dg_type='P1',u_ref=None,
+                 partition='tri', dg_type='P1', u_ref=None,
                  M_t=1000, M_x=2000, set_wandb=False):
         """
         Initialize the sequential training class.
