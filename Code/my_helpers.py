@@ -872,15 +872,15 @@ def plot_u_theta_mesh(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=0
                 if vals is not None:
                     # Denote avg_val at the center
                     ax1.text(center[1], center[0], f'{vals[idx]:.2f}', fontsize=6, color='black', ha='center', va='center')
-                    
+
         elif isinstance(pwp, PiecewiseLinearPolynomialsRect):
             rectangles = pwp.partitions
             for idx, rect in enumerate(rectangles):
                 # Plot the four edges of the rectangle
-                ax1.plot([rect[0][1], rect[3][1]], [rect[0][0], rect[3][0]], color='black', alpha=0.5, linewidth=0.5)  # Bottom
-                ax1.plot([rect[0][1], rect[1][1]], [rect[0][0], rect[1][0]], color='black', alpha=0.5, linewidth=0.5)  # Left
-                ax1.plot([rect[1][1], rect[2][1]], [rect[1][0], rect[2][0]], color='black', alpha=0.5, linewidth=0.5)  # Top
-                ax1.plot([rect[3][1], rect[2][1]], [rect[3][0], rect[2][0]], color='black', alpha=0.5, linewidth=0.5)  # Right
+                ax1.plot([rect[0][1], rect[1][1]], [rect[0][0], rect[1][0]], color='black', alpha=0.5, linewidth=0.5)  # Bottom
+                ax1.plot([rect[0][1], rect[2][1]], [rect[0][0], rect[2][0]], color='black', alpha=0.5, linewidth=0.5)  # Left
+                ax1.plot([rect[2][1], rect[3][1]], [rect[2][0], rect[3][0]], color='black', alpha=0.5, linewidth=0.5)  # Top
+                ax1.plot([rect[3][1], rect[1][1]], [rect[3][0], rect[1][0]], color='black', alpha=0.5, linewidth=0.5)  # Right
                 center = np.mean(rect, axis=0)
                 if vals is not None:
                     # Denote avg_val at the center
