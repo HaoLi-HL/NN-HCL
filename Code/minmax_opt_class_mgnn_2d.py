@@ -178,8 +178,10 @@ class MinMaxOptProb2D:
             self.elem_meas = self.ht * self.hx
         elif self.partition == 'hex':
             self.elem_meas = self.ht * self.hx * self.hy
+        elif self.partition == 'tetra':
+            self.elem_meas = self.ht * self.hx * self.hy / 6.0
         else:
-            raise ValueError("Partition must be either 'tri' or 'rect'.")
+            raise ValueError("Partition must be in ['tri', 'rect', 'hex', 'tetra'].")
         if self.sampling_method == 'normal':
             self.partition = 'tri'  # For normal sampling, we use triangular partitioning
             print(f"Using triangular partitioning for normal sampling method.")
