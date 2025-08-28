@@ -12,7 +12,7 @@ from NN_class import MLP
 class PiecewiseLinearPolynomialsTri:
     def __init__(self, N_t, N_x, t_min=0.0, t_max=1.0, x_min=0.0, x_max=1.0, times=1, bdry_times=1):
         """
-        Initialize piecewise linear polynomials on a triangular mesh with custom ranges.
+        Initialize a triangular mesh with custom ranges.
 
         Args:
             N_t: Number of divisions along the t-axis.

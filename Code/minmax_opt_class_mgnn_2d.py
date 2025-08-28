@@ -18,6 +18,7 @@ from functools import partial
 from PwpTri_class import PiecewiseLinearPolynomialsTri
 from PwpRect_class import PiecewiseLinearPolynomialsRect
 from PwpHex_class import PiecewiseLinearPolynomialsHex
+from PwpTetra_class import PiecewiseLinearPolynomialsTetra
 import wandb
 
 # Utility function to compute L2 norm of a pytree
@@ -79,8 +80,10 @@ class MinMaxOptProb2D:
             self.pwp = PiecewiseLinearPolynomialsTri(N_t, N_x, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, times=k_h_rf_times)
         elif self.partition == 'rect' and self.input_dim == 2:
             self.pwp = PiecewiseLinearPolynomialsRect(N_t, N_x, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, gauss_order=k_h_rf_times)
-        elif self.partition == 'hex' or self.input_dim == 3:
+        elif self.partition == 'hex' and self.input_dim == 3:
             self.pwp = PiecewiseLinearPolynomialsHex(N_t, N_x, self.N_y, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, y_min=self.y_min, y_max=self.y_max, gauss_order=k_h_rf_times)
+        elif self.partition == 'tetra' and self.input_dim == 3:
+            self.pwp = PiecewiseLinearPolynomialsTetra(N_t, N_x, self.N_y, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, y_min=self.y_min, y_max=self.y_max, quad_order=k_h_rf_times)
         else:
             raise ValueError("Partition must be 'tri' or 'rect' for 2D, 'hex' for 3D.")
 

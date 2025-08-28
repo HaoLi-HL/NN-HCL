@@ -7,7 +7,7 @@ from datetime import datetime
 import os
 import pickle
 from minmax_opt_class_mgnn_2d import MinMaxOptProb2D
-from my_helpers import plot_u_theta, plot_loss_history
+from my_helpers import plot_u_theta
 import matplotlib.pyplot as plt
 import wandb
 import matplotlib.gridspec as gridspec

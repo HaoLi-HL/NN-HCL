@@ -10,9 +10,9 @@ from NN_class import MLP
 
 
 class PiecewiseLinearPolynomialsRect:
-    def __init__(self, N_t, N_x, t_min=0.0, t_max=1.0, x_min=-1.0, x_max=1.0, gauss_order=3, bdry_order=3):
+    def __init__(self, N_t, N_x, t_min=0.0, t_max=1.0, x_min=-1.0, x_max=1.0, gauss_order=3, bdry_order=3, dg_type='Q1'):
         """
-        Initialize piecewise linear polynomials on a rectangular mesh with custom ranges.
+        Initialize a rectangular mesh with custom ranges.
 
         Args:
             N_t: Number of divisions along the t-axis.
@@ -34,7 +34,11 @@ class PiecewiseLinearPolynomialsRect:
         self.bdry_order = bdry_order
         self.N_elements = N_t * N_x  # Number of rectangles
         self.partitions = self._generate_rectangles()
-        self.coeffs = jnp.zeros((self.N_elements, 3))  # Coefficients a, b, c for a + b*t + c*x per rectangle
+        if dg_type is 'Q1':
+            self.p_dof = 4
+        elif dg_type is 'P1':
+            self.p_dof = 3
+        self.coeffs = jnp.zeros((self.N_elements, self.p_dof))  # Coefficients a, b, c for a + b*t + c*x per rectangle
         self.quad_points, self.quad_weights, self.element_indices, self.quad_points_parti, self.quad_weights_parti = self._setup_quadrature()
         self.bdry_points_parti, self.bdry_weights_parti = self.get_boundary_quadrature()
         self.normals = self.compute_normals()
