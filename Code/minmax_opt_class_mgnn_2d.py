@@ -451,7 +451,7 @@ class MinMaxOptProb2D:
         integrand = (1 - self.L1reg) * residual * jnp.sign(u_quad - k_h_quad)
         if self.L1reg > 1e-6:
             integrand += self.L1reg * jnp.abs(self.hx * residual)
-        if current_key is None:
+        if current_key is not None:
             probs_sampled = importance_probs[quad_element_indices_sampled]
             weighted_integrand = integrand / probs_sampled
             interior_loss = jnp.dot(quad_weights, weighted_integrand) / batch_size
