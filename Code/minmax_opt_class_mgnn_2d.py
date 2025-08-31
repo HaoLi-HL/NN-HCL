@@ -34,7 +34,7 @@ class MinMaxOptProb2D:
                  L1reg=0, sampling_method='uniform', notes='', pre_epochs=1000, nu=0.01/np.pi,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  res=None, loss_type='interior', k=0, use_a=True, M_t = 1000, M_x = 1000, f_plot=1000, plt_err_dist=False, plt_mesh=False,
-                 partition='tri', p_dof=None, dg_type='P1', u_ref=None,
+                 partition='tri', p_dof=None, dg_type='P1', use_importance_sampling=False, u_ref=None,
                  seq_train=False, set_wandb=False):
         self.input_dim = input_dim
         
@@ -188,7 +188,7 @@ class MinMaxOptProb2D:
         if self.sampling_method == 'normal':
             self.partition = 'tri'  # For normal sampling, we use triangular partitioning
             print(f"Using triangular partitioning for normal sampling method.")
-        
+        self.use_importance_sampling = use_importance_sampling
         self.u_ref = u_ref  # Reference solution for error calculation, if provided
         if not self.seq_train and self.set_wandb:
             wandb.init(project=self.project, name=self.run_name, notes=self.notes,
@@ -217,9 +217,6 @@ class MinMaxOptProb2D:
 
     def update_importance_probs(self, params):
         Nt = self.pwp.N_elements
-        # Use current k_h or recompute if needed
-        if self.loss_type != 'pinn':
-            self.pwp.coeffs, self.key, _, _ = self.maximize_kh(params, self.key)
         loss_all_elems = self.vmap_loss_fn_elem_int_per_elem(jnp.arange(Nt), self.pwp.coeffs[:, None, :], params)[0]  # Get per-elem losses
         weights = jnp.abs(loss_all_elems) + 1e-6  # Avoid zero
         self.importance_probs = weights / jnp.sum(weights)
@@ -409,7 +406,7 @@ class MinMaxOptProb2D:
             if self.dg_type == 'P1':
                 k_h_quad = p_coeffs_quad[:, 0] + p_coeffs_quad[:, 1] * quad_points[:, 0] + p_coeffs_quad[:, 2] * quad_points[:, 1]
             elif self.dg_type == 'Q1':
-                partitions = self.pwp.partitions[self.pwp.quad_element_indices]
+                partitions = self.pwp.partitions[quad_element_indices_sampled]
                 t_low = partitions[:, 0, 0]
                 x_low = partitions[:, 0, 1]
                 t_high = partitions[:, -1, 0]
@@ -429,7 +426,7 @@ class MinMaxOptProb2D:
             if self.dg_type == 'P1':
                 k_h_quad = p_coeffs_quad[:, 0] + p_coeffs_quad[:, 1] * quad_points[:, 0] + p_coeffs_quad[:, 2] * quad_points[:, 1] + p_coeffs_quad[:, 3] * quad_points[:, 2]
             elif self.dg_type == 'Q1':
-                partitions = self.pwp.partitions[self.pwp.quad_element_indices]
+                partitions = self.pwp.partitions[quad_element_indices_sampled]
                 t_low = partitions[:, 0, 0]
                 x_low = partitions[:, 0, 1]
                 y_low = partitions[:, 0, 2]
@@ -456,7 +453,7 @@ class MinMaxOptProb2D:
             integrand += self.L1reg * jnp.abs(self.hx * residual)
         if current_key is None:
             probs_sampled = importance_probs[quad_element_indices_sampled]
-            weighted_integrand = integrand / probs_sampled  # Broadcast if needed
+            weighted_integrand = integrand / probs_sampled
             interior_loss = jnp.dot(quad_weights, weighted_integrand) / batch_size
             return interior_loss, current_key
         else:
@@ -633,7 +630,8 @@ class MinMaxOptProb2D:
 
         for grade_idx in range(self.total_grade):
             print(f"\nTraining Grade {grade_idx}")
-            lr = optax.schedules.warmup_cosine_decay_schedule(init_value=1e-6, peak_value=self.init_lrs[grade_idx], warmup_steps=int(grade_epochs[grade_idx]/100), decay_steps=grade_epochs[grade_idx], end_value=1e-5)
+            lr = optax.schedules.warmup_cosine_decay_schedule(init_value=1e-6, peak_value=self.init_lrs[grade_idx], warmup_steps=int(grade_epochs[grade_idx]/100), 
+                                                              decay_steps=grade_epochs[grade_idx], end_value=1e-5)
             optimizer = optax.adam(lr)
             params = self.model.mlps[grade_idx].params
             opt_state = optimizer.init(params)
@@ -642,9 +640,9 @@ class MinMaxOptProb2D:
 
             self.gen_funcs(grade_idx)
             self.maximize_kh = jit(self.maximize_kh_step)
-
             if self.loss_type != 'pinn':
                 self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1 = self.maximize_kh(params, self.key)
+                self.update_importance_probs(params)
             print(f"The largest W^{{1,inf}} norm of k_h coeffs is {jnp.max(jnp.abs(self.pwp.coeffs[:,1:])):.6f}")
             if self.gamma > 0.0 and self.adjust_gamma:
                 self.gamma = self.determine_equation_weight(grade_idx, gamma_init=self.gamma)
@@ -669,8 +667,9 @@ class MinMaxOptProb2D:
                     if self.loss_type == 'pinn':
                         print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_ibc: {loss_ibc:.6f}")
                     else:
-                        self.update_importance_probs()
-                        print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_eqn_from_kh: {loss_eqn_from_kh:.6f}, loss_l1: {loss_l1:.6f}, loss_ibc: {loss_ibc:.6f}")
+                        self.update_importance_probs(params)
+                        print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_eqn_from_kh: {loss_eqn_from_kh:.6f}", 
+                              f"loss_l1: {loss_l1:.6f}, loss_ibc: {loss_ibc:.6f}")
                     if self.set_wandb:
                         wandb.log({f"tmin{self.t_min:.1f}_tmax{self.t_max:.1f}_loss_eqn_grade{grade_idx}": loss_eqn, 
                                    f"tmin{self.t_min:.1f}_tmax{self.t_max:.1f}_loss_ibc_grade{grade_idx}": loss_ibc, 

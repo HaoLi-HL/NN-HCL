@@ -23,7 +23,7 @@ class SeqMinMaxOptProb:
                  L1reg=0, sampling_method='uniform', notes='', pre_epochs=1000, nu=0.01/np.pi,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  res=None, loss_type='interior',  k=0, use_a=True, f_plot=1000, plt_err_dist=False, plt_mesh=False,
-                 partition='tri', dg_type='P1', u_ref=None,
+                 partition='tri', dg_type='P1', use_importance_sampling=False, u_ref=None, 
                  M_t=1000, M_x=2000, set_wandb=False):
         """
         Initialize the sequential training class.
@@ -112,6 +112,7 @@ class SeqMinMaxOptProb:
         elif self.input_dim == 3:
             self.run_name = f"({total_t_max:.1f}-{total_t_min:.1f})/{num_segments}_Nt{N_t}_Nx{N_x}_Ny{N_y}_lrs{init_lrs[0]}_eps{grade_epochs[0]}_sig{sigma}_Np{N_perturb}_gam{gamma}_L1reg{L1reg}_sd{seed}"
         self.project = project
+        self.use_importance_sampling = use_importance_sampling
         self.u_ref = u_ref
 
         if self.set_wandb:
@@ -182,6 +183,7 @@ class SeqMinMaxOptProb:
                 f_adaptive_weight=self.f_adaptive_weight, f_opt_kh=self.f_opt_kh, res=self.res, 
                 loss_type=self.loss_type, k=self.k, use_a=self.use_a, 
                 f_plot=self.f_plot, plt_err_dist=self.plt_err_dist, plt_mesh=self.plt_mesh, partition=self.partition, p_dof=self.p_dof, dg_type=self.dg_type,
+                use_importance_sampling=self.use_importance_sampling, 
                 u_ref=self.u_ref, M_t=self.M_t, M_x=self.M_x, seq_train=True, set_wandb=self.set_wandb,
             )
              # Store the segment and update previous_params with the trained parameters
