@@ -383,7 +383,7 @@ class MinMaxOptProb2D:
 
 
     def loss_fn_elem_int(self, params, importance_probs=None, current_key=None):
-        if current_key is None:
+        if current_key is not None:
             key, current_key = jax.random.split(current_key)
             batch_size = int(0.8 * self.pwp.N_elements)
             element_indices_sampled = jax.random.choice(key, jnp.arange(self.pwp.N_elements), shape=(batch_size,), p=importance_probs)
