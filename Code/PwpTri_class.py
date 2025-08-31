@@ -34,7 +34,7 @@ class PiecewiseLinearPolynomialsTri:
         self.N_elements = 2 * N_t * N_x  # Two triangles per rectangle
         self.partitions = self._generate_partitions()
         self.coeffs = jnp.zeros((self.N_elements, 3))  # Coefficients for each triangle
-        self.quad_points, self.quad_weights, self.element_indices, self.quad_points_parti, self.quad_weights_parti = self._setup_quadrature()
+        self.quad_points, self.quad_weights, self.quad_element_indices, self.quad_points_parti, self.quad_weights_parti = self._setup_quadrature()
         self.bdry_points_parti, self.bdry_weights_parti = self.get_boundary_quadrature()
         self.normals = self.compute_normals()
 
@@ -67,11 +67,11 @@ class PiecewiseLinearPolynomialsTri:
         Returns:
             quad_points: Quadrature points, shape (N_quad, 2).
             quad_weights: Quadrature weights, shape (N_quad,).
-            element_indices: Indices of original triangles, shape (N_quad,).
-            quad_points_tri: Quadrature points per triangle, shape (N_elements, Nq, 2).
-            quad_weights_tri: Quadrature weights per triangle, shape (N_elements, Nq).
+            quad_element_indices: Indices of original triangles, shape (N_quad,).
+            quad_points_tri: Quadrature points per triangle, shape (N_elements, self.Nq, 2).
+            quad_weights_tri: Quadrature weights per triangle, shape (N_elements, self.Nq).
         """
-        Nq = (4 ** self.times) * 3  # Number of quadrature points per triangle
+        self.Nq = (4 ** self.times) * 3  # Number of quadrature points per triangle
 
         # Define a function to refine and compute quadrature for a single triangle
         def refine_and_setup(tri):
@@ -93,9 +93,9 @@ class PiecewiseLinearPolynomialsTri:
         # Flatten for global quadrature
         quad_points = quad_points_tri.reshape(-1, 2)
         quad_weights = quad_weights_tri.reshape(-1)
-        element_indices = jnp.repeat(jnp.arange(self.N_elements), Nq)
+        quad_element_indices = jnp.repeat(jnp.arange(self.N_elements), self.Nq)
 
-        return quad_points, quad_weights, element_indices, quad_points_tri, quad_weights_tri
+        return quad_points, quad_weights, quad_element_indices, quad_points_tri, quad_weights_tri
 
     def _refine_triangle(self, tri, times):
         """
@@ -136,11 +136,11 @@ class PiecewiseLinearPolynomialsTri:
         """
         return 0.5 * jnp.abs((v2[0] - v1[0]) * (v3[1] - v1[1]) - (v2[1] - v1[1]) * (v3[0] - v1[0]))
 
-    def evaluate(self, tx_points, element_indices):
+    def evaluate(self, tx_points, quad_element_indices):
         """Evaluate k_h at given points with corresponding element indices."""
-        return (self.coeffs[element_indices, 0] +
-                self.coeffs[element_indices, 1] * tx_points[:, 0] +
-                self.coeffs[element_indices, 2] * tx_points[:, 1])
+        return (self.coeffs[quad_element_indices, 0] +
+                self.coeffs[quad_element_indices, 1] * tx_points[:, 0] +
+                self.coeffs[quad_element_indices, 2] * tx_points[:, 1])
 
     def get_boundary_quadrature(self):
         """

@@ -215,6 +215,15 @@ class MinMaxOptProb2D:
         self.vmap_loss_fn_elem_int_per_elem = vmap(self.loss_fn_elem_int_per_elem, in_axes=(0, 0, None))
         print(f"Partition type: {self.partition}, dg_type: {self.dg_type}, p_dof: {self.p_dof}")
 
+    def update_importance_probs(self, params):
+        Nt = self.pwp.N_elements
+        # Use current k_h or recompute if needed
+        if self.loss_type != 'pinn':
+            self.pwp.coeffs, self.key, _, _ = self.maximize_kh(params, self.key)
+        loss_all_elems = self.vmap_loss_fn_elem_int_per_elem(jnp.arange(Nt), self.pwp.coeffs[:, None, :], params)[0]  # Get per-elem losses
+        weights = jnp.abs(loss_all_elems) + 1e-6  # Avoid zero
+        self.importance_probs = weights / jnp.sum(weights)
+
     def gen_ibc(self):
         if self.input_dim == 2:
             self.u_t0 = self.u0(self.x_bc)
@@ -376,20 +385,31 @@ class MinMaxOptProb2D:
     #     return total_loss
 
 
-    def loss_fn_elem_int(self, params):
-        quad_points = self.pwp.quad_points
-        quad_weights = self.pwp.quad_weights
+    def loss_fn_elem_int(self, params, importance_probs=None, current_key=None):
+        if current_key is None:
+            key, current_key = jax.random.split(current_key)
+            batch_size = int(0.8 * self.pwp.N_elements)
+            element_indices_sampled = jax.random.choice(key, jnp.arange(self.pwp.N_elements), shape=(batch_size,), p=importance_probs)
+            quad_points_sampled = self.pwp.quad_points_parti[element_indices_sampled].reshape(-1, self.input_dim-1)
+            quad_weights_sampled = self.pwp.quad_weights_parti[element_indices_sampled].reshape(-1)
+            quad_element_indices_sampled = jnp.repeat(element_indices_sampled, self.pwp.Nq)
+            quad_points = quad_points_sampled
+            quad_weights = quad_weights_sampled
+        else:
+            quad_element_indices_sampled = self.pwp.quad_element_indices
+            quad_points = self.pwp.quad_points
+            quad_weights = self.pwp.quad_weights
         u_quad = self.u_eval(params, quad_points)
         grad_u_tx = self.grad_u(params, quad_points)
         # print(f"grad_u_tx.shape: {grad_u_tx.shape}", f"u_quad.shape: {u_quad.shape}")
-        p_coeffs_quad = self.pwp.coeffs[self.pwp.element_indices]
+        p_coeffs_quad = self.pwp.coeffs[quad_element_indices_sampled]
         if self.input_dim == 2:
             u_t, u_x = grad_u_tx[:, 0], grad_u_tx[:, 1]
             residual = self.res(u_quad, u_t, u_x)
             if self.dg_type == 'P1':
                 k_h_quad = p_coeffs_quad[:, 0] + p_coeffs_quad[:, 1] * quad_points[:, 0] + p_coeffs_quad[:, 2] * quad_points[:, 1]
             elif self.dg_type == 'Q1':
-                partitions = self.pwp.partitions[self.pwp.element_indices]
+                partitions = self.pwp.partitions[self.pwp.quad_element_indices]
                 t_low = partitions[:, 0, 0]
                 x_low = partitions[:, 0, 1]
                 t_high = partitions[:, -1, 0]
@@ -409,7 +429,7 @@ class MinMaxOptProb2D:
             if self.dg_type == 'P1':
                 k_h_quad = p_coeffs_quad[:, 0] + p_coeffs_quad[:, 1] * quad_points[:, 0] + p_coeffs_quad[:, 2] * quad_points[:, 1] + p_coeffs_quad[:, 3] * quad_points[:, 2]
             elif self.dg_type == 'Q1':
-                partitions = self.pwp.partitions[self.pwp.element_indices]
+                partitions = self.pwp.partitions[self.pwp.quad_element_indices]
                 t_low = partitions[:, 0, 0]
                 x_low = partitions[:, 0, 1]
                 y_low = partitions[:, 0, 2]
@@ -434,9 +454,76 @@ class MinMaxOptProb2D:
         integrand = (1 - self.L1reg) * residual * jnp.sign(u_quad - k_h_quad)
         if self.L1reg > 1e-6:
             integrand += self.L1reg * jnp.abs(self.hx * residual)
-        interior_loss = jnp.dot(quad_weights, integrand)
-        total_loss = interior_loss
-        return total_loss
+        if current_key is None:
+            probs_sampled = importance_probs[quad_element_indices_sampled]
+            weighted_integrand = integrand / probs_sampled  # Broadcast if needed
+            interior_loss = jnp.dot(quad_weights, weighted_integrand) / batch_size
+            return interior_loss, current_key
+        else:
+            interior_loss = jnp.dot(quad_weights, integrand)
+            return interior_loss
+    
+    # def loss_fn_elem_int(self, params):
+    #     quad_points = self.pwp.quad_points
+    #     quad_weights = self.pwp.quad_weights
+    #     u_quad = self.u_eval(params, quad_points)
+    #     grad_u_tx = self.grad_u(params, quad_points)
+    #     # print(f"grad_u_tx.shape: {grad_u_tx.shape}", f"u_quad.shape: {u_quad.shape}")
+    #     p_coeffs_quad = self.pwp.coeffs[self.pwp.quad_element_indices]
+    #     if self.input_dim == 2:
+    #         u_t, u_x = grad_u_tx[:, 0], grad_u_tx[:, 1]
+    #         residual = self.res(u_quad, u_t, u_x)
+    #         if self.dg_type == 'P1':
+    #             k_h_quad = p_coeffs_quad[:, 0] + p_coeffs_quad[:, 1] * quad_points[:, 0] + p_coeffs_quad[:, 2] * quad_points[:, 1]
+    #         elif self.dg_type == 'Q1':
+    #             partitions = self.pwp.partitions[self.pwp.quad_element_indices]
+    #             t_low = partitions[:, 0, 0]
+    #             x_low = partitions[:, 0, 1]
+    #             t_high = partitions[:, -1, 0]
+    #             x_high = partitions[:, -1, 1]
+    #             local_t = (quad_points[:, 0] - t_low) / (t_high - t_low)
+    #             local_x = (quad_points[:, 1] - x_low) / (x_high - x_low)
+    #             k_h_quad = (
+    #                 p_coeffs_quad[:, 0] * (1 - local_t) * (1 - local_x)  + 
+    #                 p_coeffs_quad[:, 1] * (1 - local_t) * local_x  + 
+    #                 p_coeffs_quad[:, 2] * local_t * (1 - local_x)  + 
+    #                 p_coeffs_quad[:, 3] * local_t * local_x
+    #                 )
+
+    #     elif self.input_dim == 3:
+    #         u_t, u_x, u_y = grad_u_tx[:, 0], grad_u_tx[:, 1], grad_u_tx[:, 2]
+    #         residual = self.res(u_quad, u_t, u_x, u_y)
+    #         if self.dg_type == 'P1':
+    #             k_h_quad = p_coeffs_quad[:, 0] + p_coeffs_quad[:, 1] * quad_points[:, 0] + p_coeffs_quad[:, 2] * quad_points[:, 1] + p_coeffs_quad[:, 3] * quad_points[:, 2]
+    #         elif self.dg_type == 'Q1':
+    #             partitions = self.pwp.partitions[self.pwp.quad_element_indices]
+    #             t_low = partitions[:, 0, 0]
+    #             x_low = partitions[:, 0, 1]
+    #             y_low = partitions[:, 0, 2]
+    #             t_high = partitions[:, -1, 0]
+    #             x_high = partitions[:, -1, 1]
+    #             y_high = partitions[:, -1, 2]
+    #             local_t = (quad_points[:, 0] - t_low) / (t_high - t_low)
+    #             local_x = (quad_points[:, 1] - x_low) / (x_high - x_low)
+    #             local_y = (quad_points[:, 2] - y_low) / (y_high - y_low)
+    #             k_h_quad = (
+    #                 p_coeffs_quad[:, 0] * (1 - local_t) * (1 - local_x) * (1 - local_y) + 
+    #                 p_coeffs_quad[:, 1] * (1 - local_t) * (1 - local_x) * local_y +
+    #                 p_coeffs_quad[:, 2] * (1 - local_t) * local_x * (1 - local_y) + 
+    #                 p_coeffs_quad[:, 3] * (1 - local_t) * local_x * local_y + 
+    #                 p_coeffs_quad[:, 4] * local_t * (1 - local_x) * (1 - local_y) + 
+    #                 p_coeffs_quad[:, 5] * local_t * (1 - local_x) * local_y + 
+    #                 p_coeffs_quad[:, 6] * local_t * local_x * (1 - local_y) + 
+    #                 p_coeffs_quad[:, 7] * local_t * local_x * local_y
+    #                 )
+        
+    #     # k_h_quad = jnp.einsum('ij, ij->i', p_coeffs_quad[:, 1:], quad_points) + p_coeffs_quad[:, 0]
+    #     integrand = (1 - self.L1reg) * residual * jnp.sign(u_quad - k_h_quad)
+    #     if self.L1reg > 1e-6:
+    #         integrand += self.L1reg * jnp.abs(self.hx * residual)
+    #     interior_loss = jnp.dot(quad_weights, integrand)
+    #     total_loss = interior_loss
+    #     return total_loss
 
 
     def loss_fn_ic(self, params):
@@ -466,7 +553,11 @@ class MinMaxOptProb2D:
         return total_loss, (loss_eqn, loss_ibc)
     
     def train_step(self, params, optimizer, opt_state):
-        (_, all_losses), grads = jax.value_and_grad(self.loss_fn, argnums=0, has_aux=True)(params)
+        if self.use_importance_sampling:
+            (_, all_losses_key), grads = jax.value_and_grad(self.loss_fn, argnums=0, has_aux=True)(params, self.importance_probs, self.key)
+            self.key = all_losses_key[2]
+        else:
+            (_, all_losses), grads = jax.value_and_grad(self.loss_fn, argnums=0, has_aux=True)(params)
         updates, opt_state = optimizer.update(grads, opt_state)
         params = optax.apply_updates(params, updates)
         return all_losses[0], all_losses[1], params, opt_state
@@ -578,6 +669,7 @@ class MinMaxOptProb2D:
                     if self.loss_type == 'pinn':
                         print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_ibc: {loss_ibc:.6f}")
                     else:
+                        self.update_importance_probs()
                         print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_eqn_from_kh: {loss_eqn_from_kh:.6f}, loss_l1: {loss_l1:.6f}, loss_ibc: {loss_ibc:.6f}")
                     if self.set_wandb:
                         wandb.log({f"tmin{self.t_min:.1f}_tmax{self.t_max:.1f}_loss_eqn_grade{grade_idx}": loss_eqn, 

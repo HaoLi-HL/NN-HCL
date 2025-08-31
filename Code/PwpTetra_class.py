@@ -44,7 +44,7 @@ class PiecewiseLinearPolynomialsTetra:
         else:
             raise ValueError("Only 'P1' dg_type supported for tetrahedral elements.")
         self.coeffs = jnp.zeros((self.N_elements, self.p_dof))
-        self.quad_points, self.quad_weights, self.element_indices, self.quad_points_parti, self.quad_weights_parti = self._setup_quadrature()
+        self.quad_points, self.quad_weights, self.quad_element_indices, self.quad_points_parti, self.quad_weights_parti = self._setup_quadrature()
         # self.bdry_points_parti, self.bdry_weights_parti = self.get_boundary_quadrature()
         # self.normals = self.compute_normals()
         
@@ -81,18 +81,19 @@ class PiecewiseLinearPolynomialsTetra:
         Returns:
             quad_points: Quadrature points, shape (N_quad, 3).
             quad_weights: Quadrature weights, shape (N_quad,).
-            element_indices: Indices of tetrahedra, shape (N_quad,).
-            quad_points_parti: Quadrature points per tetrahedron, shape (N_elements, Nq, 3).
-            quad_weights_parti: Quadrature weights per tetrahedron, shape (N_elements, Nq).
+            quad_element_indices: Indices of tetrahedra, shape (N_quad,).
+            quad_points_parti: Quadrature points per tetrahedron, shape (N_elements, self.Nq, 3).
+            quad_weights_parti: Quadrature weights per tetrahedron, shape (N_elements, self.Nq).
         """
         if self.quad_order == 1:
-            Nq = 1
+            # self.Nq = 1
             # bary_points = jnp.array([[0.25, 0.25, 0.25, 0.25]])
             # norm_weights = jnp.array([1.0])
+            self.Nq = 4
             bary_points = jnp.eye(4)
             norm_weights = jnp.array([0.25, 0.25, 0.25, 0.25])
         elif self.quad_order == 2:
-            Nq = 4
+            self.Nq = 4
             a = (1.0 + jnp.sqrt(1.8)) / 4.0
             b = (1.0 - a) / 3.0
             bary_points = jnp.array([
@@ -103,7 +104,7 @@ class PiecewiseLinearPolynomialsTetra:
             ])
             norm_weights = jnp.array([0.25, 0.25, 0.25, 0.25])
         elif self.quad_order == 3:
-            Nq = 8
+            self.Nq = 8
             alpha = 0.0585540713266
             beta = 0.263112829241
             # Optimized weights to minimize moment errors for better accuracy
@@ -126,17 +127,17 @@ class PiecewiseLinearPolynomialsTetra:
             raise ValueError("quad_order must be 1, 2, or 3.")
 
         def map_to_tetra(tet):
-            # tet shape (4, 3), bary_points (Nq, 4)
+            # tet shape (4, 3), bary_points (self.Nq, 4)
             points = jnp.einsum('qi,ij->qj', bary_points, tet)
             return points
 
-        quad_points_parti = vmap(map_to_tetra)(self.partitions)  # (N_elements, Nq, 3)
+        quad_points_parti = vmap(map_to_tetra)(self.partitions)  # (N_elements, self.Nq, 3)
 
-        quad_weights_parti = jnp.full((self.N_elements, Nq), self.vol_per_tetra) * norm_weights[None, :]
+        quad_weights_parti = jnp.full((self.N_elements, self.Nq), self.vol_per_tetra) * norm_weights[None, :]
 
         # Flatten for global quadrature
         quad_points = quad_points_parti.reshape(-1, 3)
         quad_weights = quad_weights_parti.reshape(-1)
-        element_indices = jnp.repeat(jnp.arange(self.N_elements), Nq)
+        quad_element_indices = jnp.repeat(jnp.arange(self.N_elements), self.Nq)
 
-        return quad_points, quad_weights, element_indices, quad_points_parti, quad_weights_parti
+        return quad_points, quad_weights, quad_element_indices, quad_points_parti, quad_weights_parti

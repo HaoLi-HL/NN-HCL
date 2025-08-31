@@ -39,7 +39,7 @@ class PiecewiseLinearPolynomialsRect:
         elif dg_type is 'P1':
             self.p_dof = 3
         self.coeffs = jnp.zeros((self.N_elements, self.p_dof))  # Coefficients a, b, c for a + b*t + c*x per rectangle
-        self.quad_points, self.quad_weights, self.element_indices, self.quad_points_parti, self.quad_weights_parti = self._setup_quadrature()
+        self.quad_points, self.quad_weights, self.quad_element_indices, self.quad_points_parti, self.quad_weights_parti = self._setup_quadrature()
         self.bdry_points_parti, self.bdry_weights_parti = self.get_boundary_quadrature()
         self.normals = self.compute_normals()
 
@@ -66,11 +66,11 @@ class PiecewiseLinearPolynomialsRect:
         Returns:
             quad_points: Quadrature points, shape (N_quad, 2).
             quad_weights: Quadrature weights, shape (N_quad,).
-            element_indices: Indices of rectangles, shape (N_quad,).
-            quad_points_parti: Quadrature points per rectangle, shape (N_elements, Nq, 2).
-            quad_weights_parti: Quadrature weights per rectangle, shape (N_elements, Nq).
+            quad_element_indices: Indices of rectangles, shape (N_quad,).
+            quad_points_parti: Quadrature points per rectangle, shape (N_elements, self.Nq, 2).
+            quad_weights_parti: Quadrature weights per rectangle, shape (N_elements, self.Nq).
         """
-        Nq = self.gauss_order ** 2  # Number of quadrature points per rectangle
+        self.Nq = self.gauss_order ** 2  # Number of quadrature points per rectangle
 
         # Gauss-Legendre nodes and weights in [-1, 1]
         nodes, weights = np.polynomial.legendre.leggauss(self.gauss_order)
@@ -102,9 +102,9 @@ class PiecewiseLinearPolynomialsRect:
         # Flatten for global quadrature
         quad_points = quad_points_rect.reshape(-1, 2)
         quad_weights = quad_weights_rect.reshape(-1)
-        element_indices = jnp.repeat(jnp.arange(self.N_elements), Nq)
+        quad_element_indices = jnp.repeat(jnp.arange(self.N_elements), self.Nq)
 
-        return quad_points, quad_weights, element_indices, quad_points_rect, quad_weights_rect
+        return quad_points, quad_weights, quad_element_indices, quad_points_rect, quad_weights_rect
 
     def get_boundary_quadrature(self):
         """

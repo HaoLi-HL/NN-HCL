@@ -38,7 +38,7 @@ class PiecewiseLinearPolynomialsHex:
         elif dg_type is 'P1':
             self.p_dof = 4
         self.coeffs = jnp.zeros((self.N_elements, self.p_dof))
-        self.quad_points, self.quad_weights, self.element_indices, self.quad_points_parti, self.quad_weights_parti = self._setup_quadrature()
+        self.quad_points, self.quad_weights, self.quad_element_indices, self.quad_points_parti, self.quad_weights_parti = self._setup_quadrature()
         # self.bdry_points_parti, self.bdry_weights_parti = self.get_boundary_quadrature()
         # self.normals = self.compute_normals()
 
@@ -66,11 +66,11 @@ class PiecewiseLinearPolynomialsHex:
         Returns:
             quad_points: Quadrature points, shape (N_quad, 3).
             quad_weights: Quadrature weights, shape (N_quad,).
-            element_indices: Indices of hexahedra, shape (N_quad,).
-            quad_points_parti: Quadrature points per hexahedron, shape (N_elements, Nq, 3).
-            quad_weights_parti: Quadrature weights per hexahedron, shape (N_elements, Nq).
+            quad_element_indices: Indices of hexahedra, shape (N_quad,).
+            quad_points_parti: Quadrature points per hexahedron, shape (N_elements, self.Nq, 3).
+            quad_weights_parti: Quadrature weights per hexahedron, shape (N_elements, self.Nq).
         """
-        Nq = self.gauss_order ** 3  # Number of quadrature points per hexahedron
+        self.Nq = self.gauss_order ** 3  # Number of quadrature points per hexahedron
 
         # Gauss-Legendre nodes and weights in [-1, 1]
         nodes, weights = np.polynomial.legendre.leggauss(self.gauss_order)
@@ -105,6 +105,6 @@ class PiecewiseLinearPolynomialsHex:
         # Flatten for global quadrature
         quad_points = quad_points_parti.reshape(-1, 3)
         quad_weights = quad_weights_parti.reshape(-1)
-        element_indices = jnp.repeat(jnp.arange(self.N_elements), Nq)
+        quad_element_indices = jnp.repeat(jnp.arange(self.N_elements), self.Nq)
 
-        return quad_points, quad_weights, element_indices, quad_points_parti, quad_weights_parti
+        return quad_points, quad_weights, quad_element_indices, quad_points_parti, quad_weights_parti
