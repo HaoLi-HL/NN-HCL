@@ -216,8 +216,9 @@ class MinMaxOptProb2D:
         print(f"Partition type: {self.partition}, dg_type: {self.dg_type}, p_dof: {self.p_dof}")
 
     def update_importance_probs(self, params):
+        print(f"Updating importance sampling probabilities...")
         Nt = self.pwp.N_elements
-        loss_all_elems = self.vmap_loss_fn_elem_int_per_elem(jnp.arange(Nt), self.pwp.coeffs[:, None, :], params)[0]  # Get per-elem losses
+        loss_all_elems = self.vmap_loss_fn_elem_int_per_elem(jnp.arange(Nt), self.pwp.coeffs[:, None, :], params)[0].squeeze()  # Get per-elem losses
         weights = jnp.abs(loss_all_elems) + 1e-6  # Avoid zero
         self.importance_probs = weights / jnp.sum(weights)
 
@@ -387,7 +388,7 @@ class MinMaxOptProb2D:
             key, current_key = jax.random.split(current_key)
             batch_size = int(0.8 * self.pwp.N_elements)
             element_indices_sampled = jax.random.choice(key, jnp.arange(self.pwp.N_elements), shape=(batch_size,), p=importance_probs)
-            quad_points_sampled = self.pwp.quad_points_parti[element_indices_sampled].reshape(-1, self.input_dim-1)
+            quad_points_sampled = self.pwp.quad_points_parti[element_indices_sampled].reshape(-1, self.input_dim)
             quad_weights_sampled = self.pwp.quad_weights_parti[element_indices_sampled].reshape(-1)
             quad_element_indices_sampled = jnp.repeat(element_indices_sampled, self.pwp.Nq)
             quad_points = quad_points_sampled
@@ -535,24 +536,33 @@ class MinMaxOptProb2D:
     def loss_fn_ibc(self, params):
         return self.loss_fn_ic(params) + self.loss_fn_bc(params)
 
-    def loss_fn_lambda(self, params):
+    def loss_fn_lambda(self, params, importance_probs=None, current_key=None):
         loss_ic = self.loss_fn_ic(params)
         loss_bc = self.loss_fn_bc(params)
-        loss_eqn = self.loss_fn_eqn(params)
-        # loss_eqn = 0
-        total_loss = self.lambda_eqn * loss_eqn + self.lambda_ic * loss_ic + self.lambda_bc * loss_bc
-        return total_loss, (loss_eqn, loss_ic + loss_bc)
+        if current_key is not None:
+            loss_eqn, current_key = self.loss_fn_eqn(params, importance_probs, current_key)
+            total_loss = self.lambda_eqn * loss_eqn + self.lambda_ic * loss_ic + self.lambda_bc * loss_bc
+            return total_loss, (loss_eqn, loss_ic + loss_bc, current_key)
+        else:
+            loss_eqn = self.loss_fn_eqn(params)
+            total_loss = self.lambda_eqn * loss_eqn + self.lambda_ic * loss_ic + self.lambda_bc * loss_bc
+            return total_loss, (loss_eqn, loss_ic + loss_bc)
     
-    def loss_fn_gamma(self, params):
+    def loss_fn_gamma(self, params, importance_probs=None, current_key=None):
         loss_ibc = self.loss_fn_ibc(params)
-        loss_eqn = self.loss_fn_eqn(params)
-        total_loss = self.gamma * loss_eqn + (1 - self.gamma) * loss_ibc
-        return total_loss, (loss_eqn, loss_ibc)
+        if current_key is not None:
+            loss_eqn, current_key = self.loss_fn_eqn(params, importance_probs, current_key)
+            total_loss = self.gamma * loss_eqn + (1 - self.gamma) * loss_ibc
+            return total_loss, (loss_eqn, loss_ibc, current_key)
+        else:
+            loss_eqn = self.loss_fn_eqn(params)
+            total_loss = self.gamma * loss_eqn + (1 - self.gamma) * loss_ibc
+            return total_loss, (loss_eqn, loss_ibc)
     
-    def train_step(self, params, optimizer, opt_state):
+    def train_step(self, params, optimizer, opt_state, importance_probs=None, current_key=None):
         if self.use_importance_sampling:
-            (_, all_losses_key), grads = jax.value_and_grad(self.loss_fn, argnums=0, has_aux=True)(params, self.importance_probs, self.key)
-            self.key = all_losses_key[2]
+            (_, all_losses), grads = jax.value_and_grad(self.loss_fn, argnums=0, has_aux=True)(params, importance_probs, current_key)
+            self.key = all_losses[2] # In this case, all_losses = (loss_eqn, loss_ibc, current_key)
         else:
             (_, all_losses), grads = jax.value_and_grad(self.loss_fn, argnums=0, has_aux=True)(params)
         updates, opt_state = optimizer.update(grads, opt_state)
