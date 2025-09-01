@@ -562,6 +562,8 @@ class MinMaxOptProb2D:
     def train_step(self, params, optimizer, opt_state, importance_probs=None, current_key=None):
         if self.use_importance_sampling:
             (_, all_losses), grads = jax.value_and_grad(self.loss_fn, argnums=0, has_aux=True)(params, importance_probs, current_key)
+            print(f"all_losses: {all_losses}")
+            print(f"len(all_losses): {len(all_losses)}")
             self.key = all_losses[2] # In this case, all_losses = (loss_eqn, loss_ibc, current_key)
         else:
             (_, all_losses), grads = jax.value_and_grad(self.loss_fn, argnums=0, has_aux=True)(params)
@@ -653,7 +655,6 @@ class MinMaxOptProb2D:
             if self.loss_type != 'pinn':
                 self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1 = self.maximize_kh(params, self.key)
                 self.update_importance_probs(params)
-            print(f"The largest W^{{1,inf}} norm of k_h coeffs is {jnp.max(jnp.abs(self.pwp.coeffs[:,1:])):.6f}")
             if self.gamma > 0.0 and self.adjust_gamma:
                 self.gamma = self.determine_equation_weight(grade_idx, gamma_init=self.gamma)
                 print(f"Stage 1, Gamma: {self.gamma:.6f}")
