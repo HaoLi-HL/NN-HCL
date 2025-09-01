@@ -385,7 +385,7 @@ class MinMaxOptProb2D:
 
 
     def loss_fn_elem_int(self, params, importance_probs=None, current_key=None):
-        if self.use_importance_sampling:
+        if importance_probs is not None:
             key, current_key = jax.random.split(current_key)
             batch_size = int(0.8 * self.pwp.N_elements)
             element_indices_sampled = jax.random.choice(key, jnp.arange(self.pwp.N_elements), shape=(batch_size,), p=importance_probs)
@@ -453,7 +453,7 @@ class MinMaxOptProb2D:
         integrand = (1 - self.L1reg) * residual * jnp.sign(u_quad - k_h_quad)
         if self.L1reg > 1e-6:
             integrand += self.L1reg * jnp.abs(self.hx * residual)
-        if self.use_importance_sampling:
+        if importance_probs is not None:
             probs_sampled = importance_probs[quad_element_indices_sampled]
             weighted_integrand = integrand / probs_sampled
             interior_loss = jnp.dot(quad_weights, weighted_integrand) / batch_size
@@ -540,7 +540,7 @@ class MinMaxOptProb2D:
     def loss_fn_lambda(self, params, importance_probs=None, current_key=None):
         loss_ic = self.loss_fn_ic(params)
         loss_bc = self.loss_fn_bc(params)
-        if self.use_importance_sampling:
+        if importance_probs is not None:
             loss_eqn, current_key = self.loss_fn_eqn(params, importance_probs, current_key)
             total_loss = self.lambda_eqn * loss_eqn + self.lambda_ic * loss_ic + self.lambda_bc * loss_bc
             return total_loss, (loss_eqn, loss_ic + loss_bc, current_key)
@@ -551,7 +551,7 @@ class MinMaxOptProb2D:
     
     def loss_fn_gamma(self, params, importance_probs=None, current_key=None):
         loss_ibc = self.loss_fn_ibc(params)
-        if self.use_importance_sampling:
+        if importance_probs is not None:
             loss_eqn, current_key = self.loss_fn_eqn(params, importance_probs, current_key)
             total_loss = self.gamma * loss_eqn + (1 - self.gamma) * loss_ibc
             return total_loss, (loss_eqn, loss_ibc, current_key)
