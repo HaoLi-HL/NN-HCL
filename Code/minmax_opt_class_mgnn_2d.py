@@ -560,7 +560,7 @@ class MinMaxOptProb2D:
             total_loss = self.gamma * loss_eqn + (1 - self.gamma) * loss_ibc
             return total_loss, (loss_eqn, loss_ibc)
     
-    @partial(jax.jit, static_argnames=['self', 'optimizer'])
+    # @partial(jax.jit, static_argnames=['self', 'optimizer'])
     def train_step(self, params, optimizer, opt_state, importance_probs=None, current_key=None):
         if self.use_importance_sampling:
             (_, all_losses), grads = jax.value_and_grad(self.loss_fn, argnums=0, has_aux=True)(params, importance_probs, current_key)
