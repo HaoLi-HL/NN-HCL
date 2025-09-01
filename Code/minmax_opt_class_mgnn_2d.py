@@ -20,6 +20,7 @@ from PwpRect_class import PiecewiseLinearPolynomialsRect
 from PwpHex_class import PiecewiseLinearPolynomialsHex
 from PwpTetra_class import PiecewiseLinearPolynomialsTetra
 import wandb
+from functools import partial
 
 # Utility function to compute L2 norm of a pytree
 def pytree_l2_norm(pytree):
@@ -384,7 +385,7 @@ class MinMaxOptProb2D:
 
 
     def loss_fn_elem_int(self, params, importance_probs=None, current_key=None):
-        if current_key is not None:
+        if self.use_importance_sampling:
             key, current_key = jax.random.split(current_key)
             batch_size = int(0.8 * self.pwp.N_elements)
             element_indices_sampled = jax.random.choice(key, jnp.arange(self.pwp.N_elements), shape=(batch_size,), p=importance_probs)
@@ -452,7 +453,7 @@ class MinMaxOptProb2D:
         integrand = (1 - self.L1reg) * residual * jnp.sign(u_quad - k_h_quad)
         if self.L1reg > 1e-6:
             integrand += self.L1reg * jnp.abs(self.hx * residual)
-        if current_key is not None:
+        if self.use_importance_sampling:
             probs_sampled = importance_probs[quad_element_indices_sampled]
             weighted_integrand = integrand / probs_sampled
             interior_loss = jnp.dot(quad_weights, weighted_integrand) / batch_size
@@ -539,7 +540,7 @@ class MinMaxOptProb2D:
     def loss_fn_lambda(self, params, importance_probs=None, current_key=None):
         loss_ic = self.loss_fn_ic(params)
         loss_bc = self.loss_fn_bc(params)
-        if current_key is not None:
+        if self.use_importance_sampling:
             loss_eqn, current_key = self.loss_fn_eqn(params, importance_probs, current_key)
             total_loss = self.lambda_eqn * loss_eqn + self.lambda_ic * loss_ic + self.lambda_bc * loss_bc
             return total_loss, (loss_eqn, loss_ic + loss_bc, current_key)
@@ -550,7 +551,7 @@ class MinMaxOptProb2D:
     
     def loss_fn_gamma(self, params, importance_probs=None, current_key=None):
         loss_ibc = self.loss_fn_ibc(params)
-        if current_key is not None:
+        if self.use_importance_sampling:
             loss_eqn, current_key = self.loss_fn_eqn(params, importance_probs, current_key)
             total_loss = self.gamma * loss_eqn + (1 - self.gamma) * loss_ibc
             return total_loss, (loss_eqn, loss_ibc, current_key)
@@ -559,17 +560,18 @@ class MinMaxOptProb2D:
             total_loss = self.gamma * loss_eqn + (1 - self.gamma) * loss_ibc
             return total_loss, (loss_eqn, loss_ibc)
     
+    @partial(jax.jit, static_argnames=['self', 'optimizer'])
     def train_step(self, params, optimizer, opt_state, importance_probs=None, current_key=None):
         if self.use_importance_sampling:
             (_, all_losses), grads = jax.value_and_grad(self.loss_fn, argnums=0, has_aux=True)(params, importance_probs, current_key)
-            print(f"all_losses: {all_losses}")
-            print(f"len(all_losses): {len(all_losses)}")
-            self.key = all_losses[2] # In this case, all_losses = (loss_eqn, loss_ibc, current_key)
+            updates, opt_state = optimizer.update(grads, opt_state)
+            params = optax.apply_updates(params, updates)
+            return all_losses[0], all_losses[1], all_losses[2], params, opt_state # In this case, all_losses = (loss_eqn, loss_ibc, current_key)
         else:
             (_, all_losses), grads = jax.value_and_grad(self.loss_fn, argnums=0, has_aux=True)(params)
-        updates, opt_state = optimizer.update(grads, opt_state)
-        params = optax.apply_updates(params, updates)
-        return all_losses[0], all_losses[1], params, opt_state
+            updates, opt_state = optimizer.update(grads, opt_state)
+            params = optax.apply_updates(params, updates)
+            return all_losses[0], all_losses[1], params, opt_state
 
     def pre_train_to_ic(self, pre_epochs=0, pre_lr=1e-3):
         if pre_epochs <= 0 and self.pre_epochs <= 0:
@@ -663,7 +665,10 @@ class MinMaxOptProb2D:
                 if (iter % self.f_adaptive_weight == 0) and (self.gamma == 0.0):
                     self.update_adaptive_weights(params)
                     print(f"Grade {grade_idx}, Iter {iter}, lambda_ic: {self.lambda_ic:.6f}, lambda_bc: {self.lambda_bc:.6f}, lambda_eqn: {self.lambda_eqn:.6f}")
-                loss_eqn, loss_ibc, params, opt_state = self.train_step(params, optimizer, opt_state)
+                if self.use_importance_sampling:
+                    loss_eqn, loss_ibc, self.key, params, opt_state = self.train_step(params, optimizer, opt_state, self.importance_probs, self.key)
+                else:
+                    loss_eqn, loss_ibc, params, opt_state = self.train_step(params, optimizer, opt_state)
                 if iter % self.f_opt_kh == 0 and self.loss_type != 'pinn':
                     self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1 = self.maximize_kh(params, self.key)
                 loss_eqn = self.loss_fn_eqn(params)
