@@ -1065,7 +1065,8 @@ def plot_u_theta_mesh(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=0
                         center_y = np.mean(y_top)
                         if vals is not None:
                             # ax1.text(center_x, center_y, f'{vals[surface_indices[i]]:.1e}', fontsize=6, color='black', ha='center', va='center')
-                            ax1.text(center_x, center_y, f'{vals[surface_indices[i]]: .0e}', fontsize=5, color='black', ha='center', va='center', clip_on=True, bbox=dict(facecolor='white', alpha=0.5, pad=1))
+                            # ax1.text(center_x, center_y, f'{vals[surface_indices[i]]: .0e}', fontsize=5, color='black', ha='center', va='center', clip_on=True, bbox=dict(facecolor='white', alpha=0.5, pad=1))
+                            ax1.text(center_x, center_y, compact_sci(vals[surface_indices[i]]), fontsize=6, color='white', ha='center', va='center')
             
             elif isinstance(pwp, PiecewiseLinearPolynomialsTetra):
                 for i, tet in enumerate(surface_elems):
@@ -1082,7 +1083,8 @@ def plot_u_theta_mesh(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=0
                         center_y = np.mean(y_top)
                         if vals is not None:
                             # ax1.text(center_x, center_y, f'{vals[surface_indices[i]]:.1e}', fontsize=6, color='black', ha='center', va='center')
-                            ax1.text(center_x, center_y, f'{vals[surface_indices[i]]: .0e}', fontsize=5, color='black', ha='center', va='center', clip_on=True, bbox=dict(facecolor='white', alpha=0.5, pad=1))
+                            ax1.text(center_x, center_y, compact_sci(vals[surface_indices[i]]), fontsize=6, color='white', ha='center', va='center')
+                                        
             else:
                 print("No such class!!!")
         
@@ -1137,7 +1139,7 @@ def plot_u_theta_mesh(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=0
                             center_x = np.mean(x_top)
                             center_y = np.mean(y_top)
                             if vals is not None:
-                                ax2.text(center_x, center_y, f'{vals[surface_indices[i]]:.1e}', fontsize=6, color='black', ha='center', va='center')
+                                # ax2.text(center_x, center_y, f'{vals[surface_indices[i]]:.1e}', fontsize=6, color='black', ha='center', va='center')
                 else:
                     print("No such class!!!")
 
@@ -1219,3 +1221,17 @@ def plot_u_2D(ts, u_given, x_min=0.0, x_max=1.0, y_min=0.0, y_max=1.0, nx=1000, 
     
     plt.tight_layout()
     plt.show()
+
+
+
+def compact_sci(val, prec=1, uppercase=True):
+    fmt = f'{{val:.{prec}{"E" if uppercase else "e"}}}'
+    s = fmt.format(val=val)
+    # Remove decimal if it's .0
+    mant, exp = s.split('E' if uppercase else 'e')
+    if mant.endswith('.0'):
+        mant = mant[:-2]
+    s = mant + ('E' if uppercase else 'e') + exp
+    # Remove leading zero in exponent
+    s = s.replace('E-0', 'E-').replace('E+0', 'E+').replace('e-0', 'e-').replace('e+0', 'e+')
+    return s
