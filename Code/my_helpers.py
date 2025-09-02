@@ -979,7 +979,8 @@ def plot_u_theta_mesh(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=0
                     center = np.mean(tri, axis=0)
                     if vals is not None:
                         # Denote avg_val at the center
-                        ax1.text(center[1], center[0], f'{vals[idx]:.1e}', fontsize=6, color='black', ha='center', va='center')
+                        # ax1.text(center[1], center[0], f'{vals[idx]:.1e}', fontsize=6, color='black', ha='center', va='center')
+                        ax1.text(center[1], center[0], f'{vals[idx]: .0e}', fontsize=4, color='black', ha='center', va='center', clip_on=True, bbox=dict(facecolor='white', alpha=0.5, pad=1))
 
             elif isinstance(pwp, PiecewiseLinearPolynomialsRect):
                 rectangles = pwp.partitions
@@ -992,7 +993,8 @@ def plot_u_theta_mesh(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=0
                     center = np.mean(rect, axis=0)
                     if vals is not None:
                         # Denote avg_val at the center
-                        ax1.text(center[1], center[0], f'{vals[idx]:.1e}', fontsize=6, color='black', ha='center', va='center')
+                        # ax1.text(center[1], center[0], f'{vals[idx]:.1e}', fontsize=6, color='black', ha='center', va='center')
+                        ax1.text(center[1], center[0], f'{vals[idx]: .0e}', fontsize=4, color='black', ha='center', va='center', clip_on=True, bbox=dict(facecolor='white', alpha=0.5, pad=1))
 
         # Adjust layout and display the main plot
         plt.tight_layout()
