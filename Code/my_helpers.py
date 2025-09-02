@@ -10,6 +10,8 @@ import matplotlib.gridspec as gridspec
 from matplotlib import cm
 from PwpTri_class import PiecewiseLinearPolynomialsTri
 from PwpRect_class import PiecewiseLinearPolynomialsRect
+from PwpHex_class import PiecewiseLinearPolynomialsHex
+from PwpTetra_class import PiecewiseLinearPolynomialsTetra
 
 
 def plot_loss_history(loss_int, loss_bc, title):
@@ -809,7 +811,104 @@ def plot_comparison_seperate_combined_u_theta(seq_model, u_ref=None, file_path='
             plt.savefig(f"plot_t_{t_val:.2f}.eps", format='eps', bbox_inches='tight')
         plt.show()
 
-def plot_u_theta_mesh(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=0.5, x_min=-1.0, x_max=1.0, ts=None, upload_fig=False, pwp=None, vals=None):
+# def plot_u_theta_mesh(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=0.5, x_min=-1.0, x_max=1.0, ts=None, upload_fig=False, pwp=None, vals=None):
+#     """
+#     Plot the neural network function u_theta over a specified domain [t_min, t_max] x [x_min, x_max].
+#     Optionally overlay the mesh from PiecewiseLinearPolynomials and denote vals on the meshes.
+#     The 1D plot at t = t_max is removed, and only the 2D plot is shown.
+
+#     Args:
+#         model: Neural network u_theta.
+#         params: Parameters (pytree) of the neural network.
+#         M_t: Number of grid points in the t-direction (default: 1000).
+#         M_x: Number of grid points in the x-direction (default: 2000).
+#         t_min: Minimum value for t (default: 0.0).
+#         t_max: Maximum value for t (default: 0.5).
+#         x_min: Minimum value for x (default: -1.0).
+#         x_max: Maximum value for x (default: 1.0).
+#         ts: List or array of timestamps for which to plot individual 1D snapshots (default: None).
+#         upload_fig: Whether to upload the figure to wandb (default: False).
+#         pwp: Instance of PiecewiseLinearPolynomials(Tri/Rect) to plot the mesh (default: None).
+#         vals: Values to denote on each mesh (default: None).
+#     """
+#     if ts is None:
+#         ts = []
+
+#     # Create a grid for t and x over the specified ranges
+#     t_grid = np.linspace(t_min, t_max, M_t)
+#     x_grid = np.linspace(x_min, x_max, M_x)
+#     t, x = np.meshgrid(t_grid, x_grid, indexing='ij')  # Shapes: (M_t, M_x)
+
+#     # Flatten the grid for batch evaluation
+#     tx_points = np.stack([t.ravel(), x.ravel()], axis=1)  # Shape: (M_t * M_x, 2)
+
+#     # Evaluate u_theta on the grid points
+#     if params is None:
+#         u_values = model.forward(tx_points)
+#     else:
+#         u_values = model.forward_with_params(params, tx_points) if hasattr(model, 'forward_with_params') else model(params, tx_points)
+#     u_values = u_values.reshape(M_t, M_x)  # Reshape to (M_t, M_x)
+
+#     # Create larger figure for the 2D plot
+#     t_range = t_max - t_min
+#     fig = plt.figure(figsize=(20, 8 + 8 * t_range))
+#     ax1 = fig.add_subplot(111)
+
+#     # 2D color mesh plot
+#     pcm = ax1.pcolormesh(x_grid, t_grid, u_values, shading='nearest', cmap='viridis')
+#     fig.colorbar(pcm, ax=ax1)
+#     ax1.set_xlabel('x')
+#     ax1.set_ylabel('t')
+#     ax1.set_title('Neural Network Function $u_\\theta$')
+
+#     # Overlay the mesh and denote vals if pwp and vals are provided
+#     if pwp is not None:
+#         if isinstance(pwp, PiecewiseLinearPolynomialsTri):
+#             triangles = pwp.partitions
+#             for idx, tri in enumerate(triangles):
+#                 # Plot the three edges of the triangle
+#                 ax1.plot([tri[0][1], tri[1][1]], [tri[0][0], tri[1][0]], color='black', alpha=0.5, linewidth=0.5)
+#                 ax1.plot([tri[1][1], tri[2][1]], [tri[1][0], tri[2][0]], color='black', alpha=0.5, linewidth=0.5)
+#                 ax1.plot([tri[2][1], tri[0][1]], [tri[2][0], tri[0][0]], color='black', alpha=0.5, linewidth=0.5)
+#                 center = np.mean(tri, axis=0)
+#                 if vals is not None:
+#                     # Denote avg_val at the center
+#                     ax1.text(center[1], center[0], f'{vals[idx]:.2f}', fontsize=6, color='black', ha='center', va='center')
+
+#         elif isinstance(pwp, PiecewiseLinearPolynomialsRect):
+#             rectangles = pwp.partitions
+#             for idx, rect in enumerate(rectangles):
+#                 # Plot the four edges of the rectangle
+#                 ax1.plot([rect[0][1], rect[1][1]], [rect[0][0], rect[1][0]], color='black', alpha=0.5, linewidth=0.5)  # Bottom
+#                 ax1.plot([rect[0][1], rect[2][1]], [rect[0][0], rect[2][0]], color='black', alpha=0.5, linewidth=0.5)  # Left
+#                 ax1.plot([rect[2][1], rect[3][1]], [rect[2][0], rect[3][0]], color='black', alpha=0.5, linewidth=0.5)  # Top
+#                 ax1.plot([rect[3][1], rect[1][1]], [rect[3][0], rect[1][0]], color='black', alpha=0.5, linewidth=0.5)  # Right
+#                 center = np.mean(rect, axis=0)
+#                 if vals is not None:
+#                     # Denote avg_val at the center
+#                     ax1.text(center[1], center[0], f'{vals[idx]:.2f}', fontsize=6, color='black', ha='center', va='center')
+
+#     # Adjust layout and display the main plot
+#     plt.tight_layout()
+#     # Upload the main figure to wandb
+#     if upload_fig:
+#         wandb.log({f"u_theta_tmin{t_min:.1f}_tmax_{t_max:.1f}": wandb.Image(fig)})
+#     plt.show()
+
+#     # Plot separate figures for each timestamp in ts
+#     for t_val in ts:
+#         # Find the closest index in t_grid
+#         idx = np.argmin(np.abs(t_grid - t_val))
+#         # Create a new figure for the snapshot
+#         fig, ax = plt.subplots(1, 1, figsize=(10, 4))
+#         ax.plot(x_grid, u_values[idx, :])
+#         ax.set_xlabel('x')
+#         ax.set_ylabel('$u_\\theta(t, x)$')
+#         ax.set_title(f'Neural Network Function at t = {t_val:.2f} (closest t = {t_grid[idx]:.2f})')
+#         plt.tight_layout()
+#         plt.show()
+
+def plot_u_theta_mesh(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=0.5, x_min=-1.0, x_max=1.0, y_min=None, y_max=None, M_y=None, ts=None, upload_fig=False, pwp=None, vals=None, u_ref=None):
     """
     Plot the neural network function u_theta over a specified domain [t_min, t_max] x [x_min, x_max].
     Optionally overlay the mesh from PiecewiseLinearPolynomials and denote vals on the meshes.
@@ -824,88 +923,253 @@ def plot_u_theta_mesh(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=0
         t_max: Maximum value for t (default: 0.5).
         x_min: Minimum value for x (default: -1.0).
         x_max: Maximum value for x (default: 1.0).
+        y_min: Minimum value for y (for 3D cases, default: None).
+        y_max: Maximum value for y (for 3D cases, default: None).
+        M_y: Number of grid points in the y-direction (for 3D cases, default: None, falls back to M_x).
         ts: List or array of timestamps for which to plot individual 1D snapshots (default: None).
         upload_fig: Whether to upload the figure to wandb (default: False).
-        pwp: Instance of PiecewiseLinearPolynomials(Tri/Rect) to plot the mesh (default: None).
+        pwp: Instance of PiecewiseLinearPolynomials(Tri/Rect/Hex/Tetra) to plot the mesh (default: None).
         vals: Values to denote on each mesh (default: None).
+        u_ref: Callable reference solution function u_ref(t, x, y) (default: None). If provided for input_dim=3, plots it side-by-side with u_theta at t=t_max, including mesh overlay.
     """
     if ts is None:
         ts = []
 
-    # Create a grid for t and x over the specified ranges
-    t_grid = np.linspace(t_min, t_max, M_t)
-    x_grid = np.linspace(x_min, x_max, M_x)
-    t, x = np.meshgrid(t_grid, x_grid, indexing='ij')  # Shapes: (M_t, M_x)
+    input_dim = model.input_dim if hasattr(model, 'input_dim') else 2
+    if M_y is None:
+        M_y = M_x
 
-    # Flatten the grid for batch evaluation
-    tx_points = np.stack([t.ravel(), x.ravel()], axis=1)  # Shape: (M_t * M_x, 2)
+    if input_dim == 2:
+        # Create a grid for t and x over the specified ranges
+        t_grid = np.linspace(t_min, t_max, M_t)
+        x_grid = np.linspace(x_min, x_max, M_x)
+        t, x = np.meshgrid(t_grid, x_grid, indexing='ij')  # Shapes: (M_t, M_x)
 
-    # Evaluate u_theta on the grid points
-    if params is None:
-        u_values = model.forward(tx_points)
-    else:
-        u_values = model.forward_with_params(params, tx_points) if hasattr(model, 'forward_with_params') else model(params, tx_points)
-    u_values = u_values.reshape(M_t, M_x)  # Reshape to (M_t, M_x)
+        # Flatten the grid for batch evaluation
+        tx_points = np.stack([t.ravel(), x.ravel()], axis=1)  # Shape: (M_t * M_x, 2)
 
-    # Create larger figure for the 2D plot
-    t_range = t_max - t_min
-    fig = plt.figure(figsize=(20, 8 + 8 * t_range))
-    ax1 = fig.add_subplot(111)
+        # Evaluate u_theta on the grid points
+        if params is None:
+            u_values = model.forward(tx_points)
+        else:
+            u_values = model.forward_with_params(params, tx_points) if hasattr(model, 'forward_with_params') else model(params, tx_points)
+        u_values = u_values.reshape(M_t, M_x)  # Reshape to (M_t, M_x)
 
-    # 2D color mesh plot
-    pcm = ax1.pcolormesh(x_grid, t_grid, u_values, shading='nearest', cmap='viridis')
-    fig.colorbar(pcm, ax=ax1)
-    ax1.set_xlabel('x')
-    ax1.set_ylabel('t')
-    ax1.set_title('Neural Network Function $u_\\theta$')
+        # Create larger figure for the 2D plot
+        t_range = t_max - t_min
+        fig = plt.figure(figsize=(20, 8 + 8 * t_range))
+        ax1 = fig.add_subplot(111)
 
-    # Overlay the mesh and denote vals if pwp and vals are provided
-    if pwp is not None:
-        if isinstance(pwp, PiecewiseLinearPolynomialsTri):
-            triangles = pwp.partitions
-            for idx, tri in enumerate(triangles):
-                # Plot the three edges of the triangle
-                ax1.plot([tri[0][1], tri[1][1]], [tri[0][0], tri[1][0]], color='black', alpha=0.5, linewidth=0.5)
-                ax1.plot([tri[1][1], tri[2][1]], [tri[1][0], tri[2][0]], color='black', alpha=0.5, linewidth=0.5)
-                ax1.plot([tri[2][1], tri[0][1]], [tri[2][0], tri[0][0]], color='black', alpha=0.5, linewidth=0.5)
-                center = np.mean(tri, axis=0)
-                if vals is not None:
-                    # Denote avg_val at the center
-                    ax1.text(center[1], center[0], f'{vals[idx]:.2f}', fontsize=6, color='black', ha='center', va='center')
+        # 2D color mesh plot
+        pcm = ax1.pcolormesh(x_grid, t_grid, u_values, shading='nearest', cmap='viridis')
+        fig.colorbar(pcm, ax=ax1)
+        ax1.set_xlabel('x')
+        ax1.set_ylabel('t')
+        ax1.set_title('Neural Network Function $u_\\theta$')
 
-        elif isinstance(pwp, PiecewiseLinearPolynomialsRect):
-            rectangles = pwp.partitions
-            for idx, rect in enumerate(rectangles):
-                # Plot the four edges of the rectangle
-                ax1.plot([rect[0][1], rect[1][1]], [rect[0][0], rect[1][0]], color='black', alpha=0.5, linewidth=0.5)  # Bottom
-                ax1.plot([rect[0][1], rect[2][1]], [rect[0][0], rect[2][0]], color='black', alpha=0.5, linewidth=0.5)  # Left
-                ax1.plot([rect[2][1], rect[3][1]], [rect[2][0], rect[3][0]], color='black', alpha=0.5, linewidth=0.5)  # Top
-                ax1.plot([rect[3][1], rect[1][1]], [rect[3][0], rect[1][0]], color='black', alpha=0.5, linewidth=0.5)  # Right
-                center = np.mean(rect, axis=0)
-                if vals is not None:
-                    # Denote avg_val at the center
-                    ax1.text(center[1], center[0], f'{vals[idx]:.2f}', fontsize=6, color='black', ha='center', va='center')
+        # Overlay the mesh and denote vals if pwp and vals are provided
+        if pwp is not None:
+            if isinstance(pwp, PiecewiseLinearPolynomialsTri):
+                triangles = pwp.partitions
+                for idx, tri in enumerate(triangles):
+                    # Plot the three edges of the triangle
+                    ax1.plot([tri[0][1], tri[1][1]], [tri[0][0], tri[1][0]], color='black', alpha=0.5, linewidth=0.5)
+                    ax1.plot([tri[1][1], tri[2][1]], [tri[1][0], tri[2][0]], color='black', alpha=0.5, linewidth=0.5)
+                    ax1.plot([tri[2][1], tri[0][1]], [tri[2][0], tri[0][0]], color='black', alpha=0.5, linewidth=0.5)
+                    center = np.mean(tri, axis=0)
+                    if vals is not None:
+                        # Denote avg_val at the center
+                        ax1.text(center[1], center[0], f'{vals[idx]:.1e}', fontsize=6, color='black', ha='center', va='center')
 
-    # Adjust layout and display the main plot
-    plt.tight_layout()
-    # Upload the main figure to wandb
-    if upload_fig:
-        wandb.log({f"u_theta_tmin{t_min:.1f}_tmax_{t_max:.1f}": wandb.Image(fig)})
-    plt.show()
+            elif isinstance(pwp, PiecewiseLinearPolynomialsRect):
+                rectangles = pwp.partitions
+                for idx, rect in enumerate(rectangles):
+                    # Plot the four edges of the rectangle
+                    ax1.plot([rect[0][1], rect[1][1]], [rect[0][0], rect[1][0]], color='black', alpha=0.5, linewidth=0.5)  # Bottom
+                    ax1.plot([rect[0][1], rect[2][1]], [rect[0][0], rect[2][0]], color='black', alpha=0.5, linewidth=0.5)  # Left
+                    ax1.plot([rect[2][1], rect[3][1]], [rect[2][0], rect[3][0]], color='black', alpha=0.5, linewidth=0.5)  # Top
+                    ax1.plot([rect[3][1], rect[1][1]], [rect[3][0], rect[1][0]], color='black', alpha=0.5, linewidth=0.5)  # Right
+                    center = np.mean(rect, axis=0)
+                    if vals is not None:
+                        # Denote avg_val at the center
+                        ax1.text(center[1], center[0], f'{vals[idx]:.1e}', fontsize=6, color='black', ha='center', va='center')
 
-    # Plot separate figures for each timestamp in ts
-    for t_val in ts:
-        # Find the closest index in t_grid
-        idx = np.argmin(np.abs(t_grid - t_val))
-        # Create a new figure for the snapshot
-        fig, ax = plt.subplots(1, 1, figsize=(10, 4))
-        ax.plot(x_grid, u_values[idx, :])
-        ax.set_xlabel('x')
-        ax.set_ylabel('$u_\\theta(t, x)$')
-        ax.set_title(f'Neural Network Function at t = {t_val:.2f} (closest t = {t_grid[idx]:.2f})')
+        # Adjust layout and display the main plot
         plt.tight_layout()
+        # Upload the main figure to wandb
+        if upload_fig:
+            wandb.log({f"u_theta_tmin{t_min:.1f}_tmax_{t_max:.1f}": wandb.Image(fig)})
         plt.show()
 
+    elif input_dim == 3:
+        if y_min is None or y_max is None:
+            raise ValueError("For input_dim=3, y_min and y_max must be provided.")
+
+        # 2D plot at t = t_max over (x, y)
+        x_grid = np.linspace(x_min, x_max, M_x)
+        y_grid = np.linspace(y_min, y_max, M_y)
+        x, y = np.meshgrid(x_grid, y_grid)  # Shapes: (M_x, M_y)
+        
+        t = t_max * np.ones_like(x)
+        txy_points = np.stack([t.ravel(), x.ravel(), y.ravel()], axis=1)  # Shape: (M_x * M_y, 3)
+        
+        # Evaluate u_theta on the grid points
+        if params is None:
+            u_values = model.forward(txy_points)
+        else:
+            u_values = model.forward_with_params(params, txy_points) if hasattr(model, 'forward_with_params') else model(params, txy_points)
+        u_values = u_values.reshape(M_y, M_x)  # Reshape to (M_x, M_y)
+        
+        # Determine figure size based on whether u_ref is provided
+        fig_width = 20 if u_ref is not None else 10
+        fig = plt.figure(figsize=(fig_width, 8))
+        
+        # Plot u_theta
+        ax1 = fig.add_subplot(121) if u_ref is not None else fig.add_subplot(111)
+        
+        # 2D color mesh plot for u_theta
+        pcm1 = ax1.pcolormesh(x_grid, y_grid, u_values, shading='nearest', cmap='viridis')
+        fig.colorbar(pcm1, ax=ax1)
+        ax1.set_xlabel('x')
+        ax1.set_ylabel('y')
+        ax1.set_title(f'Neural Network Function $u_\\theta$ at t = {t_max:.2f}')
+        
+        # Overlay the mesh and denote vals for elements sharing a face with t = t_max
+        
+        if pwp is not None:
+            partitions = pwp.partitions
+            # Find elements that share a face with t = t_max (i.e., max t == t_max)
+            max_t_per_elem = np.max(partitions[:, :, 0], axis=1)
+            surface_mask = np.isclose(max_t_per_elem, t_max, atol=1e-6)
+            surface_elems = partitions[surface_mask]
+            surface_indices = np.where(surface_mask)[0]
+            
+            if isinstance(pwp, PiecewiseLinearPolynomialsHex):
+                
+                for i, hex_elem in enumerate(surface_elems):
+                    # Find vertices at t = t_max (top face)
+                    top_mask = np.isclose(hex_elem[:, 0], t_max, atol=1e-6)
+                    top_verts = hex_elem[top_mask]
+                    if len(top_verts) == 4:  # Expected for hex top face
+                        x_top = top_verts[:, 1]
+                        y_top = top_verts[:, 2]
+                        # Order for closed rectangle: assuming vertices [lowx lowy, lowx highy, highx lowy, highx highy]
+                        # Indices based on binary order: 0: lowx lowy, 1: lowx highy, 2: highx lowy, 3: highx highy
+                        indices = np.array([0, 1, 3, 2])
+                        ax1.plot(np.append(x_top[indices], x_top[indices[0]]), np.append(y_top[indices], y_top[indices[0]]), 
+                                 color='black', alpha=0.5, linewidth=0.5)
+                        
+                        center_x = np.mean(x_top)
+                        center_y = np.mean(y_top)
+                        if vals is not None:
+                            ax1.text(center_x, center_y, f'{vals[surface_indices[i]]:.1e}', fontsize=6, color='black', ha='center', va='center')
+            
+            elif isinstance(pwp, PiecewiseLinearPolynomialsTetra):
+                for i, tet in enumerate(surface_elems):
+                    # Find vertices at t = t_max
+                    top_mask = np.isclose(tet[:, 0], t_max, atol=1e-6)
+                    top_verts = tet[top_mask]
+                    if len(top_verts) == 3:  # Triangle face
+                        x_top = top_verts[:, 1]
+                        y_top = top_verts[:, 2]
+                        ax1.plot(np.append(x_top, x_top[0]), np.append(y_top, y_top[0]), 
+                                 color='black', alpha=0.5, linewidth=0.5)
+                        
+                        center_x = np.mean(x_top)
+                        center_y = np.mean(y_top)
+                        if vals is not None:
+                            ax1.text(center_x, center_y, f'{vals[surface_indices[i]]:.1e}', fontsize=6, color='black', ha='center', va='center')
+            else:
+                print("No such class!!!")
+        
+        # If u_ref is provided, plot it side-by-side
+        if u_ref is not None:
+            # Evaluate u_ref on the same grid points (assuming u_ref takes (t, x, y))
+            u_ref_values = u_ref(txy_points[:, 0], txy_points[:, 1], txy_points[:, 2])
+            u_ref_values = u_ref_values.reshape(M_y, M_x)
+            
+            ax2 = fig.add_subplot(122)
+            
+            # 2D color mesh plot for u_ref
+            pcm2 = ax2.pcolormesh(x_grid, y_grid, u_ref_values, shading='nearest', cmap='viridis')
+            fig.colorbar(pcm2, ax=ax2)
+            ax2.set_xlabel('x')
+            ax2.set_ylabel('y')
+            ax2.set_title(f'Reference Solution $u_ref$ at t = {t_max:.2f}')
+            
+            # Overlay the same mesh on u_ref plot
+            if pwp is not None:
+                if isinstance(pwp, PiecewiseLinearPolynomialsHex):
+                    
+                    for i, hex_elem in enumerate(surface_elems):
+                        # Find vertices at t = t_max (top face)
+                        top_mask = np.isclose(hex_elem[:, 0], t_max, atol=1e-6)
+                        top_verts = hex_elem[top_mask]
+                        if len(top_verts) == 4:  # Expected for hex top face
+                            x_top = top_verts[:, 1]
+                            y_top = top_verts[:, 2]
+                            # Order for closed rectangle: assuming vertices [lowx lowy, lowx highy, highx lowy, highx highy]
+                            # Indices based on binary order: 0: lowx lowy, 1: lowx highy, 2: highx lowy, 3: highx highy
+                            indices = np.array([0, 1, 3, 2])
+                            ax2.plot(np.append(x_top[indices], x_top[indices[0]]), np.append(y_top[indices], y_top[indices[0]]), 
+                                     color='black', alpha=0.5, linewidth=0.5)
+                            
+                            center_x = np.mean(x_top)
+                            center_y = np.mean(y_top)
+                            # if vals is not None:
+                            #     ax2.text(center_x, center_y, f'{vals[surface_indices[i]]:.1e}', fontsize=6, color='black', ha='center', va='center')
+                
+                elif isinstance(pwp, PiecewiseLinearPolynomialsTetra):
+                    for i, tet in enumerate(surface_elems):
+                        # Find vertices at t = t_max
+                        top_mask = np.isclose(tet[:, 0], t_max, atol=1e-6)
+                        top_verts = tet[top_mask]
+                        if len(top_verts) == 3:  # Triangle face
+                            x_top = top_verts[:, 1]
+                            y_top = top_verts[:, 2]
+                            ax2.plot(np.append(x_top, x_top[0]), np.append(y_top, y_top[0]), 
+                                     color='black', alpha=0.5, linewidth=0.5)
+                            
+                            center_x = np.mean(x_top)
+                            center_y = np.mean(y_top)
+                            if vals is not None:
+                                ax2.text(center_x, center_y, f'{vals[surface_indices[i]]:.1e}', fontsize=6, color='black', ha='center', va='center')
+                else:
+                    print("No such class!!!")
+
+        plt.tight_layout()
+        # Upload the figure to wandb
+        if upload_fig:
+            wandb.log({f"u_theta_at_tmax_{t_max:.1f}": wandb.Image(fig)})
+        plt.show()
+
+    # Plot separate figures for each timestamp in ts (adapted for dimension)
+    for t_val in ts:
+        if input_dim == 2:
+            # Find the closest index in t_grid
+            idx = np.argmin(np.abs(t_grid - t_val))
+            # Create a new figure for the snapshot
+            fig, ax = plt.subplots(1, 1, figsize=(10, 4))
+            ax.plot(x_grid, u_values[idx, :])
+            ax.set_xlabel('x')
+            ax.set_ylabel('$u_\\theta(t, x)$')
+            ax.set_title(f'Neural Network Function at t = {t_val:.2f} (closest t = {t_grid[idx]:.2f})')
+            plt.tight_layout()
+            plt.show()
+        elif input_dim == 3:
+            # Similar to t_max plot but without mesh/vals (or adapt if needed)
+            x, y = np.meshgrid(x_grid, y_grid)
+            t = t_val * np.ones_like(x)
+            txy_points = np.stack([t.ravel(), x.ravel(), y.ravel()], axis=1)
+            u_values_ts = model.forward(txy_points).reshape(M_y, M_x)
+            fig_ts, ax_ts = plt.subplots(1, 1, figsize=(10, 8))
+            pcm_ts = ax_ts.pcolormesh(x_grid, y_grid, u_values_ts, shading='nearest', cmap='viridis')
+            fig_ts.colorbar(pcm_ts, ax=ax_ts)
+            ax_ts.set_xlabel('x')
+            ax_ts.set_ylabel('y')
+            ax_ts.set_title(f'Neural Network Function $u_\\theta$ at t = {t_val:.2f}')
+            plt.tight_layout()
+            plt.show()
 
 def plot_u_2D(ts, u_given, x_min=0.0, x_max=1.0, y_min=0.0, y_max=1.0, nx=1000, ny=1000):
     """

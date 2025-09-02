@@ -190,6 +190,7 @@ class MinMaxOptProb2D:
             self.partition = 'tri'  # For normal sampling, we use triangular partitioning
             print(f"Using triangular partitioning for normal sampling method.")
         self.use_importance_sampling = use_importance_sampling
+        self.importance_probs = None
         self.u_ref = u_ref  # Reference solution for error calculation, if provided
         if not self.seq_train and self.set_wandb:
             wandb.init(project=self.project, name=self.run_name, notes=self.notes,
@@ -216,11 +217,9 @@ class MinMaxOptProb2D:
         self.vmap_loss_fn_elem_int_per_elem = vmap(self.loss_fn_elem_int_per_elem, in_axes=(0, 0, None))
         print(f"Partition type: {self.partition}, dg_type: {self.dg_type}, p_dof: {self.p_dof}")
 
-    def update_importance_probs(self, params):
+    def update_importance_probs(self, loss_all_elems):
         print(f"Updating importance sampling probabilities...")
-        Nt = self.pwp.N_elements
-        loss_all_elems = self.vmap_loss_fn_elem_int_per_elem(jnp.arange(Nt), self.pwp.coeffs[:, None, :], params)[0].squeeze()  # Get per-elem losses
-        weights = jnp.abs(loss_all_elems) + 1e-6  # Avoid zero
+        weights = jnp.maximum(jnp.abs(loss_all_elems), 1e-6)  # Avoid zero
         self.importance_probs = weights / jnp.sum(weights)
 
     def gen_ibc(self):
@@ -293,12 +292,12 @@ class MinMaxOptProb2D:
         perturbed_coeffs_all = init_coeffs_all[:, None, :] + perturbations_all[None, :, :]
         loss_all_test, loss_l1_all = self.vmap_loss_fn_elem_int_per_elem(jnp.arange(Nt), perturbed_coeffs_all, params)
         best_indices = jnp.argmax(loss_all_test, axis=1)
-        # loss_each_elem = loss_all_test[jnp.arange(Nt), best_indices]
+        loss_each_elem = loss_all_test[jnp.arange(Nt), best_indices]
         loss_eqn = jnp.sum(loss_all_test[jnp.arange(Nt), best_indices])
         # Compute absolute loss, which is the L1 norm of the residual. Just for comparison and debugging. We do not use it in the optimization.
         loss_l1 = jnp.sum(loss_l1_all)
         best_coeffs_all = perturbed_coeffs_all[jnp.arange(Nt), best_indices]
-        return best_coeffs_all, current_key, loss_eqn, loss_l1
+        return best_coeffs_all, current_key, loss_eqn, loss_l1, loss_each_elem
 
     def loss_fn_elem_int_per_elem(self, parti_idx, p_coeffs_all, params):
         quad_points = self.pwp.quad_points_parti[parti_idx]
@@ -655,8 +654,8 @@ class MinMaxOptProb2D:
             self.gen_funcs(grade_idx)
             self.maximize_kh = jit(self.maximize_kh_step)
             if self.loss_type != 'pinn':
-                self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1 = self.maximize_kh(params, self.key)
-                self.update_importance_probs(params)
+                self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params, self.key)
+                self.update_importance_probs(loss_each_elem)
             if self.gamma > 0.0 and self.adjust_gamma:
                 self.gamma = self.determine_equation_weight(grade_idx, gamma_init=self.gamma)
                 print(f"Stage 1, Gamma: {self.gamma:.6f}")
@@ -670,7 +669,7 @@ class MinMaxOptProb2D:
                 else:
                     loss_eqn, loss_ibc, params, opt_state = self.train_step(params, optimizer, opt_state)
                 if iter % self.f_opt_kh == 0 and self.loss_type != 'pinn':
-                    self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1 = self.maximize_kh(params, self.key)
+                    self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params, self.key)
                 loss_eqn = self.loss_fn_eqn(params)
                 self.loss_eqn_history[grade_idx].append(loss_eqn)
                 self.loss_bc_history[grade_idx].append(loss_ibc)
@@ -683,7 +682,7 @@ class MinMaxOptProb2D:
                     if self.loss_type == 'pinn':
                         print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_ibc: {loss_ibc:.6f}")
                     else:
-                        self.update_importance_probs(params)
+                        self.update_importance_probs(loss_each_elem)
                         print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_eqn_from_kh: {loss_eqn_from_kh:.6f}", 
                               f"loss_l1: {loss_l1:.6f}, loss_ibc: {loss_ibc:.6f}")
                     if self.set_wandb:
@@ -714,9 +713,12 @@ class MinMaxOptProb2D:
                             t_max=self.t_max,
                             x_min=self.x_min,
                             x_max=self.x_max,
+                            y_min=self.y_min if self.input_dim == 3 else None,
+                            y_max=self.y_max if self.input_dim == 3 else None,
                             upload_fig=self.set_wandb,
                             pwp=self.pwp,
-                            vals=None if self.plt_err_dist else None,
+                            u_ref=self.u_ref if self.input_dim == 3 else None,
+                            vals=loss_each_elem if self.plt_err_dist else None,
                             )
                 self.model.mlps[grade_idx].params = params
 
