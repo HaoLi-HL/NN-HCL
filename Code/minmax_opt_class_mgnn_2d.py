@@ -704,6 +704,22 @@ class MinMaxOptProb2D:
                 self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params, self.key)
                 if self.use_importance_sampling:
                     self.update_importance_probs(loss_each_elem)
+            if self.pre_train == 'u_ref':
+                plot_u_theta_mesh(   
+                    model=self.model,
+                    M_t=self.M_t,
+                    M_x=self.M_x,
+                    t_min=self.t_min,
+                    t_max=self.t_max,
+                    x_min=self.x_min,
+                    x_max=self.x_max,
+                    y_min=self.y_min if self.input_dim == 3 else None,
+                    y_max=self.y_max if self.input_dim == 3 else None,
+                    upload_fig=self.set_wandb,
+                    pwp=self.pwp,
+                    u_ref=self.u_ref if self.input_dim == 3 else None,
+                    vals=loss_each_elem if self.plt_err_dist else None,
+                    )
             if self.gamma > 0.0 and self.adjust_gamma:
                 self.gamma = self.determine_equation_weight(grade_idx, gamma_init=self.gamma)
                 print(f"Stage 1, Gamma: {self.gamma:.6f}")
