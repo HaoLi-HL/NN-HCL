@@ -608,7 +608,7 @@ class MinMaxOptProb2D:
             loss, grads = pre_loss_grad(params)
             updates, opt_state = optimizer.update(grads, opt_state)
             params = optax.apply_updates(params, updates)
-            if iter % 100 == 0:
+            if iter % 500 == 0:
                 print(f"Pre-training Iter {iter}, Loss: {loss:.6f}")
 
         # Assign back the pre-trained parameters
@@ -648,7 +648,7 @@ class MinMaxOptProb2D:
             loss, grads = pre_loss_grad(params)
             updates, opt_state = optimizer.update(grads, opt_state)
             params = optax.apply_updates(params, updates)
-            if iter % 100 == 0:
+            if iter % 500 == 0:
                 print(f"Pre-training Iter {iter}, Loss: {loss:.6f}")
 
         # Assign back the pre-trained parameters
