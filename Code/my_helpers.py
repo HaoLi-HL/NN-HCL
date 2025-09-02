@@ -1224,7 +1224,7 @@ def plot_u_2D(ts, u_given, x_min=0.0, x_max=1.0, y_min=0.0, y_max=1.0, nx=1000, 
 
 
 
-def compact_sci(val, prec=1, uppercase=True):
+def compact_sci(val, prec=0, uppercase=True):
     fmt = f'{{val:.{prec}{"E" if uppercase else "e"}}}'
     s = fmt.format(val=val)
     # Remove decimal if it's .0
