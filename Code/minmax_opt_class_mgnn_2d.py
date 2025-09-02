@@ -194,7 +194,7 @@ class MinMaxOptProb2D:
         self.u_ref = u_ref  # Reference solution for error calculation, if provided
         self.pre_epochs = pre_epochs
         self.pre_train = pre_train  # 'ic' or 'u_ref' or ''
-        
+
         if not self.seq_train and self.set_wandb:
             wandb.init(project=self.project, name=self.run_name, notes=self.notes,
                        config={
@@ -576,11 +576,12 @@ class MinMaxOptProb2D:
             return all_losses[0], all_losses[1], params, opt_state
 
     def pre_train_to_ic(self, pre_epochs=0, pre_lr=1e-3):
-        if pre_epochs <= 0 and self.pre_epochs <= 0:
+        pre_epochs = pre_epochs if pre_epochs > 0 else self.pre_epochs
+        if pre_epochs <= 0:
             print("Skipping pre-training as pre_epochs is set to 0.")
             return
         print("\nPre-training the network to fit v(t, x) = u0(x)")
-        pre_epochs = pre_epochs if pre_epochs > 0 else self.pre_epochs
+        
         quad_points = self.pwp.quad_points
         quad_weights = self.pwp.quad_weights
         # Generate pre-training points
@@ -614,6 +615,7 @@ class MinMaxOptProb2D:
         self.model.mlps[0].params = params
     
     def pre_train_to_u_ref(self, pre_epochs=0, pre_lr=1e-3):
+        pre_epochs = pre_epochs if pre_epochs > 0 else self.pre_epochs
         if self.u_ref is None:
             print("Skipping pre-training to u_ref as u_ref is not provided.")
             return
