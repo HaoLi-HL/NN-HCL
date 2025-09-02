@@ -20,10 +20,10 @@ class SeqMinMaxOptProb:
                  N_bc=128, N_ic=256, hidden_dims_list=[(64, 64, 64, 64)], seed=0, 
                  sigma=5, N_perturb=10000, k_h_rf_times=2, f_adaptive_weight=1000, f_opt_kh=1, u0=None, u1=None, u2=None, u3=None, u4=None,  project="seq_minmax_burgers",
                  lambda_ic=20.0, lambda_bc=20.0, lambda_eqn=1.0, alpha=0.9, gamma=0.0, N_test_gamma=1000, adjust_gamma=True,
-                 L1reg=0, sampling_method='uniform', notes='', pre_epochs=1000, nu=0.01/np.pi,
+                 L1reg=0, sampling_method='uniform', notes='', nu=0.01/np.pi,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  res=None, loss_type='interior',  k=0, use_a=True, f_plot=1000, plt_err_dist=False, plt_mesh=False,
-                 partition='tri', dg_type='P1', use_importance_sampling=False, u_ref=None, 
+                 partition='tri', dg_type='P1', use_importance_sampling=False, u_ref=None, pre_epochs=1000, pre_train='',
                  M_t=1000, M_x=2000, set_wandb=False):
         """
         Initialize the sequential training class.
@@ -87,7 +87,6 @@ class SeqMinMaxOptProb:
         self.L1reg = L1reg
         self.sampling_method = sampling_method
         self.notes = notes
-        self.pre_epochs = pre_epochs
         self.nu = nu
         self.init_lrs = init_lrs
         self.grade_epochs = grade_epochs
@@ -114,6 +113,8 @@ class SeqMinMaxOptProb:
         self.project = project
         self.use_importance_sampling = use_importance_sampling
         self.u_ref = u_ref
+        self.pre_epochs = pre_epochs
+        self.pre_train = pre_train  # 'ic' or 'u_ref' or ''
 
         if self.set_wandb:
             wandb.init(project=self.project, 
@@ -177,14 +178,15 @@ class SeqMinMaxOptProb:
                 project=self.project,
                 gamma=self.gamma, alpha=self.alpha, N_test_gamma=self.N_test_gamma, adjust_gamma=self.adjust_gamma, 
                 lambda_ic=self.lambda_ic, lambda_bc=self.lambda_bc, lambda_eqn=self.lambda_eqn,
-                L1reg=self.L1reg, sampling_method=self.sampling_method, notes=self.notes, pre_epochs=self.pre_epochs, nu=self.nu,
+                L1reg=self.L1reg, sampling_method=self.sampling_method, notes=self.notes, nu=self.nu,
                 init_lrs=self.init_lrs, grade_epochs=grade_epochs, decay_rates=self.decay_rates, 
                 init_lr_stage2=self.init_lr_stage2, epoch_stage2=epoch_stage2, decay_rate_stage2=self.decay_rate_stage2,
                 f_adaptive_weight=self.f_adaptive_weight, f_opt_kh=self.f_opt_kh, res=self.res, 
                 loss_type=self.loss_type, k=self.k, use_a=self.use_a, 
                 f_plot=self.f_plot, plt_err_dist=self.plt_err_dist, plt_mesh=self.plt_mesh, partition=self.partition, p_dof=self.p_dof, dg_type=self.dg_type,
                 use_importance_sampling=self.use_importance_sampling, 
-                u_ref=self.u_ref, M_t=self.M_t, M_x=self.M_x, seq_train=True, set_wandb=self.set_wandb,
+                u_ref=self.u_ref, pre_epochs=self.pre_epochs, pre_train=self.pre_train,
+                M_t=self.M_t, M_x=self.M_x, seq_train=True, set_wandb=self.set_wandb,
             )
              # Store the segment and update previous_params with the trained parameters
             self.segments.append(segment)

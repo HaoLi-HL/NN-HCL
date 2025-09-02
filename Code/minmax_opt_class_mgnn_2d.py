@@ -32,10 +32,10 @@ class MinMaxOptProb2D:
     def __init__(self, input_dim=2, t_min=0, t_max=1, x_min=0, x_max=1, y_min=None, y_max=None, N_t=10, N_x=10, N_y=None, N_bc=128, N_ic=256, hidden_dims_list=[(64, 64, 64, 64)], seed=0, 
                  sigma=5, N_perturb=10000, k_h_rf_times=2, f_adaptive_weight=1000, f_opt_kh=1, u0=None, u1=None, u2=None, u3=None, u4=None, project="minmax_mgnn_burgers",
                  lambda_ic=20.0, lambda_bc=20.0, lambda_eqn=1.0, alpha=0.9, gamma=0.0, N_test_gamma=1000, adjust_gamma=True,
-                 L1reg=0, sampling_method='uniform', notes='', pre_epochs=1000, nu=0.01/np.pi,
+                 L1reg=0, sampling_method='uniform', notes='', nu=0.01/np.pi,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  res=None, loss_type='interior', k=0, use_a=True, M_t = 1000, M_x = 1000, f_plot=1000, plt_err_dist=False, plt_mesh=False,
-                 partition='tri', p_dof=None, dg_type='P1', use_importance_sampling=False, u_ref=None,
+                 partition='tri', p_dof=None, dg_type='P1', use_importance_sampling=False, u_ref=None, pre_epochs=1000, pre_train='',
                  seq_train=False, set_wandb=False):
         self.input_dim = input_dim
         
@@ -122,7 +122,7 @@ class MinMaxOptProb2D:
         self.res = res
         self.loss_type = loss_type
 
-        self.pre_epochs = pre_epochs
+        
         self.nu = nu
         self.gen_ibc()
         if self.loss_type == 'interior':
@@ -192,6 +192,9 @@ class MinMaxOptProb2D:
         self.use_importance_sampling = use_importance_sampling
         self.importance_probs = None
         self.u_ref = u_ref  # Reference solution for error calculation, if provided
+        self.pre_epochs = pre_epochs
+        self.pre_train = pre_train  # 'ic' or 'u_ref' or ''
+        
         if not self.seq_train and self.set_wandb:
             wandb.init(project=self.project, name=self.run_name, notes=self.notes,
                        config={
