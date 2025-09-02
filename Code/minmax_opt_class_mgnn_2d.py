@@ -610,6 +610,45 @@ class MinMaxOptProb2D:
         # Assign back the pre-trained parameters
         self.model.mlps[0].params = params
     
+    def pre_train_to_u_ref(self, pre_epochs=0, pre_lr=1e-3):
+        if self.u_ref is None:
+            print("Skipping pre-training to u_ref as u_ref is not provided.")
+            return
+        if pre_epochs <= 0:
+            print("Skipping pre-training as pre_epochs is set to 0.")
+            return
+        print("\nPre-training the network to fit the reference solution u_ref over the domain")
+        quad_points = self.pwp.quad_points
+        quad_weights = self.pwp.quad_weights
+        # Generate target values from u_ref
+        if self.input_dim == 2:
+            y_pre = self.u_ref(quad_points[:, 0], quad_points[:, 1])
+        elif self.input_dim == 3:
+            y_pre = self.u_ref(quad_points[:, 0], quad_points[:, 1], quad_points[:, 2])
+
+        # Collect all parameters (pre-train the first grade)
+        params = self.model.mlps[0].params
+        optimizer = optax.adam(pre_lr)
+        opt_state = optimizer.init(params)
+        net_u = lambda params, quad_points: self.model.forward_with_params(params, quad_points, grade_idx=0)
+        u_eval = jit(vmap(net_u, in_axes = (None, 0)))
+
+        def pre_loss(params):
+            u_pred = u_eval(params, quad_points)
+            return jnp.dot(quad_weights, (u_pred - y_pre)**2)
+
+        pre_loss_grad = jax.value_and_grad(pre_loss)
+
+        for iter in range(pre_epochs):
+            loss, grads = pre_loss_grad(params)
+            updates, opt_state = optimizer.update(grads, opt_state)
+            params = optax.apply_updates(params, updates)
+            if iter % 100 == 0:
+                print(f"Pre-training Iter {iter}, Loss: {loss:.6f}")
+
+        # Assign back the pre-trained parameters
+        self.model.mlps[0].params = params
+
     def loss_fn_pinn(self, params):
         """Loss function for PINN training."""
         # Interior loss
@@ -628,7 +667,10 @@ class MinMaxOptProb2D:
         return interior_loss
     
     def train_process_stage1(self, grade_epochs=None, save_model=True):
-        self.pre_train_to_ic()
+        if self.pre_train == 'ic':
+            self.pre_train_to_ic()
+        elif self.pre_train == 'u_ref':
+            self.pre_train_to_u_ref()
         print("\nStarting Train Stage with MGDL")
         if grade_epochs is None:
             grade_epochs = self.grade_epochs
