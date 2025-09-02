@@ -1064,7 +1064,8 @@ def plot_u_theta_mesh(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=0
                         center_x = np.mean(x_top)
                         center_y = np.mean(y_top)
                         if vals is not None:
-                            ax1.text(center_x, center_y, f'{vals[surface_indices[i]]:.1e}', fontsize=6, color='black', ha='center', va='center')
+                            # ax1.text(center_x, center_y, f'{vals[surface_indices[i]]:.1e}', fontsize=6, color='black', ha='center', va='center')
+                            ax1.text(center[1], center[0], f'{vals[idx]: .0e}', fontsize=3, color='black', ha='center', va='center', clip_on=True, bbox=dict(facecolor='white', alpha=0.5, pad=1))
             
             elif isinstance(pwp, PiecewiseLinearPolynomialsTetra):
                 for i, tet in enumerate(surface_elems):
@@ -1080,7 +1081,8 @@ def plot_u_theta_mesh(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=0
                         center_x = np.mean(x_top)
                         center_y = np.mean(y_top)
                         if vals is not None:
-                            ax1.text(center_x, center_y, f'{vals[surface_indices[i]]:.1e}', fontsize=6, color='black', ha='center', va='center')
+                            # ax1.text(center_x, center_y, f'{vals[surface_indices[i]]:.1e}', fontsize=6, color='black', ha='center', va='center')
+                            ax1.text(center[1], center[0], f'{vals[idx]: .0e}', fontsize=3, color='black', ha='center', va='center', clip_on=True, bbox=dict(facecolor='white', alpha=0.5, pad=1))
             else:
                 print("No such class!!!")
         
