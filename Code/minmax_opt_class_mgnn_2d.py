@@ -655,7 +655,8 @@ class MinMaxOptProb2D:
             self.maximize_kh = jit(self.maximize_kh_step)
             if self.loss_type != 'pinn':
                 self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params, self.key)
-                self.update_importance_probs(loss_each_elem)
+                if self.use_importance_sampling:
+                    self.update_importance_probs(loss_each_elem)
             if self.gamma > 0.0 and self.adjust_gamma:
                 self.gamma = self.determine_equation_weight(grade_idx, gamma_init=self.gamma)
                 print(f"Stage 1, Gamma: {self.gamma:.6f}")
@@ -682,7 +683,8 @@ class MinMaxOptProb2D:
                     if self.loss_type == 'pinn':
                         print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_ibc: {loss_ibc:.6f}")
                     else:
-                        self.update_importance_probs(loss_each_elem)
+                        if self.use_importance_sampling:
+                            self.update_importance_probs(loss_each_elem)
                         print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_eqn_from_kh: {loss_eqn_from_kh:.6f}", 
                               f"loss_l1: {loss_l1:.6f}, loss_ibc: {loss_ibc:.6f}")
                     if self.set_wandb:
