@@ -1101,7 +1101,7 @@ def plot_u_theta_mesh(model, params=None, M_t=1000, M_x=2000, t_min=0.0, t_max=0
             fig.colorbar(pcm2, ax=ax2)
             ax2.set_xlabel('x')
             ax2.set_ylabel('y')
-            ax2.set_title(f'Reference Solution $u_ref$ at t = {t_max:.2f}')
+            ax2.set_title(f'Reference Solution u_ref at t = {t_max:.2f}')
             
             # Overlay the same mesh on u_ref plot
             if pwp is not None:
