@@ -703,21 +703,26 @@ class MinMaxOptProb2D:
         opt_state = optimizer.init(params)
 
         def pre_loss(params):
-            return self.lambda_eqn * self.loss_fn_pinn(params) + self.lambda_ic * self.loss_fn_ic(params) + self.lambda_bc * self.loss_fn_bc(params)
-        
-        pre_loss_grad = jax.value_and_grad(pre_loss)
+            loss_eqn = self.loss_fn_pinn(params)
+            loss_ic = self.loss_fn_ic(params)
+            loss_bc = self.loss_fn_bc(params)
+            total_loss = self.lambda_eqn * loss_eqn + self.lambda_ic * loss_ic + self.lambda_bc * loss_bc
+            return total_loss, (loss_eqn, loss_ic+loss_bc)
+
+        pre_loss_grad = jax.value_and_grad(pre_loss, argnums=0, has_aux=True)
 
         for iter in range(pre_epochs):
-            loss, grads = pre_loss_grad(params)
+            (loss, all_losses), grads = pre_loss_grad(params)
             updates, opt_state = optimizer.update(grads, opt_state)
             params = optax.apply_updates(params, updates)
             if iter % 500 == 0:
-                print(f"Pre-training Iter {iter}, Loss: {loss:.6f}")
+                # print(f"Pre-training Iter {iter}, Loss: {loss:.6f}")
+                print(f"Pre-training Iter {iter}, loss_eqn: {all_losses[0]:.6f}, loss_ibc: {all_losses[1]:.6f}")
 
         # Assign back the pre-trained parameters
         self.model.mlps[0].params = params
 
-    def loss_fn_pinn(self, params):
+    def loss_fn_pinn(self, params, importance_probs=None, current_key=None):
         """Loss function for PINN training."""
         # Interior loss
         quad_points = self.pwp.quad_points
