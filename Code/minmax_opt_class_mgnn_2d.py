@@ -216,7 +216,7 @@ class MinMaxOptProb2D:
                            "sigma": sigma,
                            "L1reg": L1reg
                        })
-        self.gen_funcs()
+        self.gen_funcs(grade_idx=0)
         self.vmap_loss_fn_elem_int_per_elem = vmap(self.loss_fn_elem_int_per_elem, in_axes=(0, 0, None))
         print(f"Partition type: {self.partition}, dg_type: {self.dg_type}, p_dof: {self.p_dof}")
 
