@@ -32,9 +32,9 @@ class MinMaxOptProb2D:
     def __init__(self, input_dim=2, t_min=0, t_max=1, x_min=0, x_max=1, y_min=None, y_max=None, N_t=10, N_x=10, N_y=None, N_bc=128, N_ic=256, hidden_dims_list=[(64, 64, 64, 64)], seed=0, 
                  sigma=5, N_perturb=10000, k_h_rf_times=2, f_adaptive_weight=1000, f_opt_kh=1, u0=None, u1=None, u2=None, u3=None, u4=None, project="minmax_mgnn_burgers",
                  lambda_ic=20.0, lambda_bc=20.0, lambda_eqn=1.0, alpha=0.9, gamma=0.0, N_test_gamma=1000, adjust_gamma=True,
-                 L1reg=0, sampling_method='uniform', notes='', nu=0.01/np.pi,
+                 L1reg=0, sampling_method='uniform', notes='', nu=1e-3,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
-                 res=None, loss_type='interior', k=0, use_a=True, M_t = 1000, M_x = 1000, f_plot=1000, plt_err_dist=False, plt_mesh=False,
+                 res=None, bc_type='Dirichlet', loss_type='interior', k=0, use_a=True, M_t = 1000, M_x = 1000, f_plot=1000, plt_err_dist=False, plt_mesh=False,
                  partition='tri', p_dof=None, dg_type='P1', use_importance_sampling=False, u_ref=None, pre_epochs=1000, pre_train='',
                  seq_train=False, set_wandb=False):
         self.input_dim = input_dim
@@ -125,6 +125,14 @@ class MinMaxOptProb2D:
         
         self.nu = nu
         self.gen_ibc()
+        self.bc_type = bc_type  # 'Dirichlet' or 'inflow'
+        if self.bc_type == 'Dirichlet':
+            self.loss_fn_bc = self.loss_fn_bc_Dirichlet
+        elif self.bc_type == 'inflow':
+            self.loss_fn_bc = self.loss_fn_bc_inflow
+        else:
+            raise ValueError("bc_type must be 'Dirichlet' or 'inflow'.")
+
         if self.loss_type == 'interior':
             self.loss_fn_eqn = self.loss_fn_elem_int
         elif self.loss_type == 'boundary':
@@ -216,7 +224,7 @@ class MinMaxOptProb2D:
                            "sigma": sigma,
                            "L1reg": L1reg
                        })
-        self.gen_funcs(grade_idx=0)
+        self.gen_funcs(grade_idx=0)  # Generate functions for the first grade
         self.vmap_loss_fn_elem_int_per_elem = vmap(self.loss_fn_elem_int_per_elem, in_axes=(0, 0, None))
         print(f"Partition type: {self.partition}, dg_type: {self.dg_type}, p_dof: {self.p_dof}")
 
@@ -530,10 +538,39 @@ class MinMaxOptProb2D:
     def loss_fn_ic(self, params):
         return jnp.mean((self.u_eval(params, self.tx_t0) - self.u_t0)**2)
 
-    def loss_fn_bc(self, params):
+    def loss_fn_bc_Dirichlet(self, params):
         bc_loss = jnp.mean((self.u_eval(params, self.tx_x0) - self.u_x0)**2) + jnp.mean((self.u_eval(params, self.tx_x1) - self.u_x1)**2)
         if self.input_dim == 3:
             bc_loss += jnp.mean((self.u_eval(params, self.tx_y0) - self.u_y0)**2) + jnp.mean((self.u_eval(params, self.tx_y1) - self.u_y1)**2)
+        return bc_loss
+    
+    def loss_fn_bc_inflow(self, params):
+        bc_loss = 0.0
+
+        # x = x_min boundary, n = (-1, 0)
+        mask_x0 = (self.u_x0 * (-1) + self.u_x0 * 0) < 0  
+        error_x0 = self.u_eval(params, self.tx_x0) - self.u_x0
+        if jnp.any(mask_x0):
+            bc_loss += jnp.mean(error_x0[mask_x0] ** 2)
+
+        # x = x_max boundary, n = (1, 0)
+        mask_x1 = (self.u_x1 * 1 + self.u_x1 * 0) < 0  # u_ref < 0
+        error_x1 = self.u_eval(params, self.tx_x1) - self.u_x1
+        if jnp.any(mask_x1):
+            bc_loss += jnp.mean(error_x1[mask_x1] ** 2)
+
+        if self.input_dim == 3:
+            # y = y_min boundary, n = (0, -1)
+            mask_y0 = (self.u_y0 * 0 + self.u_y0 * (-1)) < 0  # -u_ref < 0 => u_ref > 0
+            error_y0 = self.u_eval(params, self.tx_y0) - self.u_y0
+            if jnp.any(mask_y0):
+                bc_loss += jnp.mean(error_y0[mask_y0] ** 2)
+
+            # y = y_max boundary, n = (0, 1)
+            mask_y1 = (self.u_y1 * 0 + self.u_y1 * 1) < 0  # u_ref < 0
+            error_y1 = self.u_eval(params, self.tx_y1) - self.u_y1
+            if jnp.any(mask_y1):
+                bc_loss += jnp.mean(error_y1[mask_y1] ** 2)
         return bc_loss
 
     def loss_fn_ibc(self, params):
