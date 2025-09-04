@@ -617,10 +617,10 @@ class MinMaxOptProb2D:
     def pre_train_to_u_ref(self, pre_epochs=0, pre_lr=1e-3):
         pre_epochs = pre_epochs if pre_epochs > 0 else self.pre_epochs
         if self.u_ref is None:
-            print("Skipping pre-training to u_ref as u_ref is not provided.")
+            print("Skipping pre-training to fit u_ref as u_ref is not provided.")
             return
         if pre_epochs <= 0:
-            print("Skipping pre-training as pre_epochs is set to 0.")
+            print("Skipping pre-training to fit u_ref as pre_epochs is set to 0.")
             return
         print("\nPre-training the network to fit the reference solution u_ref over the domain")
         quad_points = self.pwp.quad_points
@@ -642,6 +642,32 @@ class MinMaxOptProb2D:
             u_pred = u_eval(params, quad_points)
             return jnp.dot(quad_weights, (u_pred - y_pre)**2)
 
+        pre_loss_grad = jax.value_and_grad(pre_loss)
+
+        for iter in range(pre_epochs):
+            loss, grads = pre_loss_grad(params)
+            updates, opt_state = optimizer.update(grads, opt_state)
+            params = optax.apply_updates(params, updates)
+            if iter % 500 == 0:
+                print(f"Pre-training Iter {iter}, Loss: {loss:.6f}")
+
+        # Assign back the pre-trained parameters
+        self.model.mlps[0].params = params
+    
+    def pre_train_to_pinn(self, pre_epochs=0, pre_lr=1e-3):
+        pre_epochs = pre_epochs if pre_epochs > 0 else self.pre_epochs
+        if pre_epochs <= 0:
+            print("Skipping pre-training to pinn as pre_epochs is set to 0.")
+            return
+        print("\nPre-training the network using PINN loss over the quadrature points")
+        # Collect all parameters (pre-train the first grade)
+        params = self.model.mlps[0].params
+        optimizer = optax.adam(pre_lr)
+        opt_state = optimizer.init(params)
+
+        def pre_loss(params):
+            return self.lambda_eqn * self.loss_fn_pinn(params) + self.lambda_ic * self.loss_fn_ic(params) + self.lambda_bc * self.loss_fn_bc(params)
+        
         pre_loss_grad = jax.value_and_grad(pre_loss)
 
         for iter in range(pre_epochs):
@@ -676,6 +702,8 @@ class MinMaxOptProb2D:
             self.pre_train_to_ic()
         elif self.pre_train == 'u_ref':
             self.pre_train_to_u_ref()
+        elif self.pre_train == 'pinn':
+            self.pre_train_to_pinn()
         print("\nStarting Train Stage with MGDL")
         if grade_epochs is None:
             grade_epochs = self.grade_epochs
