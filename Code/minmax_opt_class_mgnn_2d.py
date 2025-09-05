@@ -699,6 +699,8 @@ class MinMaxOptProb2D:
         print("\nPre-training the network using PINN loss over the quadrature points")
         # Collect all parameters (pre-train the first grade)
         params = self.model.mlps[0].params
+        lr = optax.schedules.warmup_cosine_decay_schedule(init_value=1e-5, peak_value=pre_lr, warmup_steps=int(pre_epochs/100), 
+                                                          decay_steps=pre_epochs, end_value=1e-5)
         optimizer = optax.adam(pre_lr)
         opt_state = optimizer.init(params)
 
