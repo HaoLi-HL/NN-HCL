@@ -3,7 +3,7 @@ from jax import vmap
 import numpy as np
 
 class PiecewiseLinearPolynomialsHex:
-    def __init__(self, N_t, N_x, N_y, t_min=0.0, t_max=1.0, x_min=-1.0, x_max=1.0, y_min=-1.0, y_max=1.0, gauss_order=3, bdry_order=3, dg_type='Q1'):
+    def __init__(self, N_t, N_x, N_y, t_min=0.0, t_max=1.0, x_min=-1.0, x_max=1.0, y_min=-1.0, y_max=1.0, rf_times=3, bdry_order=3, dg_type='Q1'):
         """
         Initialize a hexahedral mesh with custom ranges.
 
@@ -17,7 +17,7 @@ class PiecewiseLinearPolynomialsHex:
             x_max: Maximum value for x (default: 1.0).
             y_min: Minimum value for y (default: -1.0).
             y_max: Maximum value for y (default: 1.0).
-            gauss_order: Order of Gauss quadrature (number of points per direction, default: 3).
+            rf_times: Refinement level for composite quadrature. 
             bdry_order: Order of boundary quadrature (number of points per face direction, default: 3).
         """
         self.N_t = N_t
@@ -29,13 +29,13 @@ class PiecewiseLinearPolynomialsHex:
         self.x_max = x_max
         self.y_min = y_min
         self.y_max = y_max
-        self.gauss_order = gauss_order
+        self.rf_times = rf_times
         self.bdry_order = bdry_order
         self.N_elements = N_t * N_x * N_y  # Number of hexahedra
         self.partitions = self._generate_hexahedra()
-        if dg_type is 'Q1':
+        if dg_type == 'Q1':
             self.p_dof = 8
-        elif dg_type is 'P1':
+        elif dg_type == 'P1':
             self.p_dof = 4
         self.coeffs = jnp.zeros((self.N_elements, self.p_dof))
         self.quad_points, self.quad_weights, self.quad_element_indices, self.quad_points_parti, self.quad_weights_parti = self._setup_quadrature()
@@ -61,7 +61,7 @@ class PiecewiseLinearPolynomialsHex:
         
     def _setup_quadrature(self):
         """
-        Setup Gauss quadrature points and weights for hexahedral mesh.
+        Setup composite quadrature points and weights for hexahedral mesh.
 
         Returns:
             quad_points: Quadrature points, shape (N_quad, 3).
@@ -70,37 +70,38 @@ class PiecewiseLinearPolynomialsHex:
             quad_points_parti: Quadrature points per hexahedron, shape (N_elements, self.Nq, 3).
             quad_weights_parti: Quadrature weights per hexahedron, shape (N_elements, self.Nq).
         """
-        self.Nq = self.gauss_order ** 3  # Number of quadrature points per hexahedron
+        # Composite quadrature with refinement level k = self.rf_times
+        k = self.rf_times
+        num_intervals = 2 ** k
+        num_points = num_intervals + 1
+        self.Nq = num_points ** 3
 
-        # Gauss-Legendre nodes and weights in [-1, 1]
-        nodes, weights = np.polynomial.legendre.leggauss(self.gauss_order)
-        nodes_jnp = jnp.array(nodes)
-        weights_jnp = jnp.array(weights)
-
-        # Tensor product for 3D
-        t_nodes, x_nodes, y_nodes = jnp.meshgrid(nodes_jnp, nodes_jnp, nodes_jnp)
-        t_weights, x_weights, y_weights = jnp.meshgrid(weights_jnp, weights_jnp, weights_jnp)
-        quad_weights_3d = (t_weights * x_weights * y_weights).ravel()
-
-        # Function to map [-1,1]^3 to hexahedron [t_low, t_high]x[x_low, x_high]x[y_low, y_high]
-        def map_to_hex(hex):
+        def composite_quad(hex):
             t_low, x_low, y_low = hex[0]
             t_high, x_high, y_high = hex[-1]
-            t_scale = (t_high - t_low) / 2
-            x_scale = (x_high - x_low) / 2
-            y_scale = (y_high - y_low) / 2
-            t_center = (t_high + t_low) / 2
-            x_center = (x_high + x_low) / 2
-            y_center = (y_high + y_low) / 2
-            t_points = t_center + t_nodes.ravel() * t_scale
-            x_points = x_center + x_nodes.ravel() * x_scale
-            y_points = y_center + y_nodes.ravel() * y_scale
-            points = jnp.stack([t_points, x_points, y_points], axis=1)
-            weights = quad_weights_3d * (t_scale * x_scale * y_scale)
+            dt = (t_high - t_low) / num_intervals
+            dx = (x_high - x_low) / num_intervals
+            dy = (y_high - y_low) / num_intervals
+            t_grid = jnp.linspace(t_low, t_high, num_points)
+            x_grid = jnp.linspace(x_low, x_high, num_points)
+            y_grid = jnp.linspace(y_low, y_high, num_points)
+            tt, xx, yy = jnp.meshgrid(t_grid, x_grid, y_grid, indexing='ij')
+            points = jnp.stack([tt.ravel(), xx.ravel(), yy.ravel()], axis=1)
+            wt = jnp.full(num_points, dt)
+            wt = wt.at[0].set(dt / 2)
+            wt = wt.at[-1].set(dt / 2)
+            wx = jnp.full(num_points, dx)
+            wx = wx.at[0].set(dx / 2)
+            wx = wx.at[-1].set(dx / 2)
+            wy = jnp.full(num_points, dy)
+            wy = wy.at[0].set(dy / 2)
+            wy = wy.at[-1].set(dy / 2)
+            weights_3d = wt[:, None, None] * wx[None, :, None] * wy[None, None, :]
+            weights = weights_3d.ravel()
             return points, weights
 
         # Vectorize over hexahedra
-        quad_points_parti, quad_weights_parti = vmap(map_to_hex)(self.partitions)
+        quad_points_parti, quad_weights_parti = vmap(composite_quad)(self.partitions)
 
         # Flatten for global quadrature
         quad_points = quad_points_parti.reshape(-1, 3)
