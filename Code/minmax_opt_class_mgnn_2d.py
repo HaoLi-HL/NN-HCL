@@ -61,6 +61,8 @@ class MinMaxOptProb2D:
         self.x_max = x_max
         self.M_t = M_t
         self.M_x = M_x
+        self.N_t = N_t
+        self.N_x = N_x
 
         if self.input_dim == 2:
             self.lb = jnp.array([t_min, x_min])
@@ -697,15 +699,23 @@ class MinMaxOptProb2D:
             print("Skipping pre-training to pinn as pre_epochs is set to 0.")
             return
         print("\nPre-training the network using PINN loss over the quadrature points")
+        if self.input_dim == 2:
+            pwp_pinn = PiecewiseLinearPolynomialsRect(self.N_t, self.N_x, t_min=self.t_min, t_max=self.t_max, x_min=self.x_min, x_max=self.x_max, 
+                                                     gauss_order=2, dg_type='Q1')
+            print("Using 2D quadrature from Rect meshing for PINN pre-training.")
+        elif self.input_dim == 3:
+            pwp_pinn = PiecewiseLinearPolynomialsHex(self.N_t, self.N_x, self.N_y, t_min=self.t_min, t_max=self.t_max, x_min=self.x_min, x_max=self.x_max, y_min=self.y_min, y_max=self.y_max, 
+                                                     gauss_order=2, dg_type='Q1')
+            print("Using 3D quadrature from Hex meshing for PINN pre-training.")
         # Collect all parameters (pre-train the first grade)
         params = self.model.mlps[0].params
         lr = optax.schedules.warmup_cosine_decay_schedule(init_value=1e-5, peak_value=pre_lr, warmup_steps=int(pre_epochs/100), 
                                                           decay_steps=pre_epochs, end_value=1e-5)
-        optimizer = optax.adam(pre_lr)
+        optimizer = optax.adam(lr)
         opt_state = optimizer.init(params)
 
         def pre_loss(params):
-            loss_eqn = self.loss_fn_pinn(params)
+            loss_eqn = self.loss_fn_pinn(params, quad_points=pwp_pinn.quad_points, quad_weights=pwp_pinn.quad_weights)
             loss_ic = self.loss_fn_ic(params)
             loss_bc = self.loss_fn_bc(params)
             total_loss = self.lambda_eqn * loss_eqn + self.lambda_ic * loss_ic + self.lambda_bc * loss_bc
@@ -724,11 +734,12 @@ class MinMaxOptProb2D:
         # Assign back the pre-trained parameters
         self.model.mlps[0].params = params
 
-    def loss_fn_pinn(self, params, importance_probs=None, current_key=None):
+    def loss_fn_pinn(self, params, importance_probs=None, current_key=None, quad_points=None, quad_weights=None):
         """Loss function for PINN training."""
         # Interior loss
-        quad_points = self.pwp.quad_points
-        quad_weights = self.pwp.quad_weights
+        if quad_points is None or quad_weights is None:
+            quad_points = self.pwp.quad_points
+            quad_weights = self.pwp.quad_weights
         u_quad = self.u_eval(params, quad_points)
         grad_u_tx = self.grad_u(params, quad_points)
         lap = self.laplacian(params, quad_points)
