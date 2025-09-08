@@ -10,7 +10,7 @@ from NN_class import MLP
 
 
 class PiecewiseLinearPolynomialsTri:
-    def __init__(self, N_t, N_x, t_min=0.0, t_max=1.0, x_min=0.0, x_max=1.0, times=1, bdry_times=1):
+    def __init__(self, N_t, N_x, t_min=0.0, t_max=1.0, x_min=0.0, x_max=1.0, rf_times=1, bdry_times=1):
         """
         Initialize a triangular mesh with custom ranges.
 
@@ -21,7 +21,7 @@ class PiecewiseLinearPolynomialsTri:
             t_max: Maximum value for t (default: 1.0).
             x_min: Minimum value for x (default: 0.0).
             x_max: Maximum value for x (default: 1.0).
-            times: Number of refinement levels for quadrature (default: 1).
+            rf_times: Number of refinement levels for quadrature (default: 1).
         """
         self.N_t = N_t
         self.N_x = N_x
@@ -29,7 +29,7 @@ class PiecewiseLinearPolynomialsTri:
         self.t_max = t_max
         self.x_min = x_min
         self.x_max = x_max
-        self.times = times
+        self.rf_times = rf_times
         self.bdry_times = bdry_times
         self.N_elements = 2 * N_t * N_x  # Two triangles per rectangle
         self.partitions = self._generate_partitions()
@@ -71,11 +71,11 @@ class PiecewiseLinearPolynomialsTri:
             quad_points_tri: Quadrature points per triangle, shape (N_elements, self.Nq, 2).
             quad_weights_tri: Quadrature weights per triangle, shape (N_elements, self.Nq).
         """
-        self.Nq = (4 ** self.times) * 3  # Number of quadrature points per triangle
+        self.Nq = (4 ** self.rf_times) * 3  # Number of quadrature points per triangle
 
         # Define a function to refine and compute quadrature for a single triangle
         def refine_and_setup(tri):
-            refined_triangles = self._refine_triangle(tri, self.times)
+            refined_triangles = self._refine_triangle(tri, self.rf_times)
             points = []
             weights = []
             for r_tri in refined_triangles:
@@ -97,18 +97,18 @@ class PiecewiseLinearPolynomialsTri:
 
         return quad_points, quad_weights, quad_element_indices, quad_points_tri, quad_weights_tri
 
-    def _refine_triangle(self, tri, times):
+    def _refine_triangle(self, tri, rf_times):
         """
-        Refine a triangle into 4^times smaller triangles by connecting midpoints.
+        Refine a triangle into 4^rf_times smaller triangles by connecting midpoints.
 
         Args:
             tri: Array of three vertices, shape (3, 2).
-            times: Number of refinement levels.
+            rf_times: Number of refinement levels.
 
         Returns:
-            Array of refined triangles, shape (4^times, 3, 2).
+            Array of refined triangles, shape (4^rf_times, 3, 2).
         """
-        if times == 0:
+        if rf_times == 0:
             return tri[None, :]
         else:
             m12 = (tri[0] + tri[1]) / 2
@@ -121,7 +121,7 @@ class PiecewiseLinearPolynomialsTri:
                 [m12, m23, m13]
             ])
             # Recursively refine each new triangle using vmap
-            refined = vmap(lambda t: self._refine_triangle(t, times - 1))(new_tris)
+            refined = vmap(lambda t: self._refine_triangle(t, rf_times - 1))(new_tris)
             return refined.reshape(-1, 3, 2)
 
     def _triangle_area(self, v1, v2, v3):
