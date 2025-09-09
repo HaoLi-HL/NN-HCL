@@ -680,7 +680,7 @@ class MinMaxOptProb2D:
         # Assign back the pre-trained parameters
         self.model.mlps[0].params = params
     
-    def pre_train_to_pinn(self, pre_epochs=0, pre_lr=1e-3):
+    def pre_train_to_pinn(self, pre_epochs=0, pre_lr=5e-4):
         pre_epochs = pre_epochs if pre_epochs > 0 else self.pre_epochs
         if pre_epochs <= 0:
             print("Skipping pre-training to pinn as pre_epochs is set to 0.")
