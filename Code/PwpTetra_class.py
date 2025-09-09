@@ -123,8 +123,27 @@ class PiecewiseLinearPolynomialsTetra:
             orbit2 = get_orbit(beta)
             bary_points = jnp.vstack([orbit1, orbit2])
             norm_weights = jnp.array([w1_per] * 4 + [w2_per] * 4)
+        elif self.gauss_order == 'composite':
+            self.Nq = 10
+            bary_points = jnp.array([
+                [1.0, 0.0, 0.0, 0.0],  # V0
+                [0.0, 1.0, 0.0, 0.0],  # V1
+                [0.0, 0.0, 1.0, 0.0],  # V2
+                [0.0, 0.0, 0.0, 1.0],  # V3
+                [0.5, 0.5, 0.0, 0.0],  # m_V0V1
+                [0.0, 0.0, 0.5, 0.5],  # m_V2V3
+                [0.5, 0.0, 0.5, 0.0],  # m_V0V2
+                [0.5, 0.0, 0.0, 0.5],  # m_V0V3
+                [0.0, 0.5, 0.5, 0.0],  # m_V1V2
+                [0.0, 0.5, 0.0, 0.5],  # m_V1V3
+            ])
+            norm_weights = jnp.array([
+                1.0/32, 1.0/32, 1.0/32, 1.0/32,  # vertices
+                6.0/32, 6.0/32,  # poles
+                4.0/32, 4.0/32, 4.0/32, 4.0/32   # equatorial
+            ])
         else:
-            raise ValueError("quad_order must be 1, 2, or 3.")
+            raise ValueError("quad_order must be 1, 2, 3 or composite.")
 
         def map_to_tetra(tet):
             # tet shape (4, 3), bary_points (self.Nq, 4)
