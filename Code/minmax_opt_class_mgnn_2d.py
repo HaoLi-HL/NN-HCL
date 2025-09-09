@@ -695,7 +695,7 @@ class MinMaxOptProb2D:
             print(f"Using 3D quadrature from Hex meshing for PINN pre-training with viscosity {self.nu}.")
         # Collect all parameters (pre-train the first grade)
         params = self.model.mlps[0].params
-        lr = optax.schedules.warmup_cosine_decay_schedule(init_value=1e-5, peak_value=pre_lr, warmup_steps=int(pre_epochs/100), 
+        lr = optax.schedules.warmup_cosine_decay_schedule(init_value=1e-6, peak_value=pre_lr, warmup_steps=int(pre_epochs/100), 
                                                           decay_steps=pre_epochs, end_value=1e-5)
         optimizer = optax.adam(lr)
         opt_state = optimizer.init(params)
@@ -707,16 +707,30 @@ class MinMaxOptProb2D:
             total_loss = self.lambda_eqn * loss_eqn + self.lambda_ic * loss_ic + self.lambda_bc * loss_bc
             return total_loss, (loss_eqn, loss_ic+loss_bc)
 
-        pre_loss_grad = jax.value_and_grad(pre_loss, argnums=0, has_aux=True)
-
         for iter in range(pre_epochs):
-            (loss, all_losses), grads = pre_loss_grad(params)
+            if iter % self.f_adaptive_weight == 0:
+                    self.update_adaptive_weights(params)
+            (loss, all_losses), grads = jax.value_and_grad(pre_loss, argnums=0, has_aux=True)(params)
             updates, opt_state = optimizer.update(grads, opt_state)
             params = optax.apply_updates(params, updates)
             if iter % 500 == 0:
                 # print(f"Pre-training Iter {iter}, Loss: {loss:.6f}")
                 print(f"Pre-training Iter {iter}, loss_eqn: {all_losses[0]:.6f}, loss_ibc: {all_losses[1]:.6f}")
-
+            if self.f_plot > 0 and iter % self.f_plot == 0:
+                plot_u_theta(
+                    prob=self,
+                    M_t=self.M_t,
+                    M_x=self.M_x,
+                    t_min=self.t_min,
+                    t_max=self.t_max,
+                    x_min=self.x_min,
+                    x_max=self.x_max,
+                    y_min=self.y_min if self.input_dim == 3 else None,
+                    y_max=self.y_max if self.input_dim == 3 else None,
+                    ts=None,
+                    u_ref=self.u_ref if self.input_dim == 3 else None,
+                    upload_fig=self.set_wandb
+                    )
         # Assign back the pre-trained parameters
         self.model.mlps[0].params = params
 
@@ -802,7 +816,7 @@ class MinMaxOptProb2D:
                     u_ref=self.u_ref if self.input_dim == 3 else None,
                     vals=loss_each_elem if self.plt_err_dist else None,
                     )
-            if self.gamma > 0.0 and self.adjust_gamma:
+            if self.gamma > 1e-5 and self.adjust_gamma:
                 self.gamma = self.determine_equation_weight(grade_idx, gamma_init=self.gamma)
                 print(f"Stage 1, Gamma: {self.gamma:.6f}")
             monitor_start = int(0.9 * grade_epochs[grade_idx])
