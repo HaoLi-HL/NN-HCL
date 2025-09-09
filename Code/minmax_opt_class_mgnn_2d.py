@@ -705,7 +705,7 @@ class MinMaxOptProb2D:
             print("Using 2D quadrature from Rect meshing for PINN pre-training.")
         elif self.input_dim == 3:
             pwp_pinn = PiecewiseLinearPolynomialsHex(self.N_t, self.N_x, self.N_y, t_min=self.t_min, t_max=self.t_max, x_min=self.x_min, x_max=self.x_max, y_min=self.y_min, y_max=self.y_max, 
-                                                     rf_times=2, dg_type='Q1')
+                                                     rf_times=1, dg_type='Q1')
             print("Using 3D quadrature from Hex meshing for PINN pre-training.")
         # Collect all parameters (pre-train the first grade)
         params = self.model.mlps[0].params
