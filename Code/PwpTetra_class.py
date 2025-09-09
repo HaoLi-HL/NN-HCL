@@ -123,7 +123,7 @@ class PiecewiseLinearPolynomialsTetra:
             orbit2 = get_orbit(beta)
             bary_points = jnp.vstack([orbit1, orbit2])
             norm_weights = jnp.array([w1_per] * 4 + [w2_per] * 4)
-        elif self.gauss_order == 'composite':
+        elif self.quad_order == 'composite':
             self.Nq = 10
             bary_points = jnp.array([
                 [1.0, 0.0, 0.0, 0.0],  # V0
