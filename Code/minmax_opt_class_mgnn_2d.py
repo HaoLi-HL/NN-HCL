@@ -690,7 +690,7 @@ class MinMaxOptProb2D:
                                                      rf_times=2, dg_type='Q1')
             print(f"Using 2D quadrature from Rect meshing for PINN pre-training with viscosity {self.nu}.")
         elif self.input_dim == 3:
-            pwp_pinn = PiecewiseLinearPolynomialsHex(self.N_t, self.N_x, self.N_y, t_min=self.t_min, t_max=self.t_max, x_min=self.x_min, x_max=self.x_max, y_min=self.y_min, y_max=self.y_max, 
+            pwp_pinn = PiecewiseLinearPolynomialsHex(self.N_t, self.N_x-5, self.N_y-5, t_min=self.t_min, t_max=self.t_max, x_min=self.x_min, x_max=self.x_max, y_min=self.y_min, y_max=self.y_max, 
                                                      rf_times=1, dg_type='Q1')
             print(f"Using 3D quadrature from Hex meshing for PINN pre-training with viscosity {self.nu}.")
         # Collect all parameters (pre-train the first grade)
