@@ -600,19 +600,6 @@ class MinMaxOptProb2D:
             loss_eqn = self.loss_fn_eqn(params)
             total_loss = self.gamma * loss_eqn + (1 - self.gamma) * loss_ibc
             return total_loss, (loss_eqn, loss_ibc)
-    
-    # @partial(jax.jit, static_argnames=['self', 'optimizer'])
-    def train_step(self, params, optimizer, opt_state, importance_probs=None, current_key=None):
-        if self.use_importance_sampling:
-            (_, all_losses), grads = jax.value_and_grad(self.loss_fn, argnums=0, has_aux=True)(params, importance_probs, current_key)
-            updates, opt_state = optimizer.update(grads, opt_state)
-            params = optax.apply_updates(params, updates)
-            return all_losses[0], all_losses[1], all_losses[2], params, opt_state # In this case, all_losses = (loss_eqn, loss_ibc, current_key)
-        else:
-            (_, all_losses), grads = jax.value_and_grad(self.loss_fn, argnums=0, has_aux=True)(params)
-            updates, opt_state = optimizer.update(grads, opt_state)
-            params = optax.apply_updates(params, updates)
-            return all_losses[0], all_losses[1], params, opt_state
 
     def pre_train_to_ic(self, pre_epochs=0, pre_lr=1e-3):
         pre_epochs = pre_epochs if pre_epochs > 0 else self.pre_epochs
@@ -698,15 +685,14 @@ class MinMaxOptProb2D:
         if pre_epochs <= 0:
             print("Skipping pre-training to pinn as pre_epochs is set to 0.")
             return
-        print("\nPre-training the network using PINN loss over the quadrature points")
         if self.input_dim == 2:
             pwp_pinn = PiecewiseLinearPolynomialsRect(self.N_t, self.N_x, t_min=self.t_min, t_max=self.t_max, x_min=self.x_min, x_max=self.x_max, 
                                                      rf_times=2, dg_type='Q1')
-            print("Using 2D quadrature from Rect meshing for PINN pre-training.")
+            print("Using 2D quadrature from Rect meshing for PINN pre-training with viscosity {self.nu}.")
         elif self.input_dim == 3:
             pwp_pinn = PiecewiseLinearPolynomialsHex(self.N_t, self.N_x, self.N_y, t_min=self.t_min, t_max=self.t_max, x_min=self.x_min, x_max=self.x_max, y_min=self.y_min, y_max=self.y_max, 
                                                      rf_times=1, dg_type='Q1')
-            print("Using 3D quadrature from Hex meshing for PINN pre-training.")
+            print(f"Using 3D quadrature from Hex meshing for PINN pre-training with viscosity {self.nu}.")
         # Collect all parameters (pre-train the first grade)
         params = self.model.mlps[0].params
         lr = optax.schedules.warmup_cosine_decay_schedule(init_value=1e-5, peak_value=pre_lr, warmup_steps=int(pre_epochs/100), 
@@ -751,6 +737,19 @@ class MinMaxOptProb2D:
             residual = self.res(u_quad, u_t, u_x, u_y) - self.nu*lap
         interior_loss = jnp.dot(quad_weights, residual**2)
         return interior_loss
+    
+    # @partial(jax.jit, static_argnames=['self', 'optimizer'])
+    def train_step(self, params, optimizer, opt_state, importance_probs=None, current_key=None):
+        if self.use_importance_sampling:
+            (_, all_losses), grads = jax.value_and_grad(self.loss_fn, argnums=0, has_aux=True)(params, importance_probs, current_key)
+            updates, opt_state = optimizer.update(grads, opt_state)
+            params = optax.apply_updates(params, updates)
+            return all_losses[0], all_losses[1], all_losses[2], params, opt_state # In this case, all_losses = (loss_eqn, loss_ibc, current_key)
+        else:
+            (_, all_losses), grads = jax.value_and_grad(self.loss_fn, argnums=0, has_aux=True)(params)
+            updates, opt_state = optimizer.update(grads, opt_state)
+            params = optax.apply_updates(params, updates)
+            return all_losses[0], all_losses[1], params, opt_state
     
     def train_process_stage1(self, grade_epochs=None, save_model=True):
         if self.pre_train == 'ic':
