@@ -680,7 +680,7 @@ class MinMaxOptProb2D:
         # Assign back the pre-trained parameters
         self.model.mlps[0].params = params
     
-    def pre_train_to_pinn(self, pre_epochs=0, pre_lr=5e-4):
+    def pre_train_to_pinn(self, pre_epochs=0, pre_lr=1e-3):
         pre_epochs = pre_epochs if pre_epochs > 0 else self.pre_epochs
         if pre_epochs <= 0:
             print("Skipping pre-training to pinn as pre_epochs is set to 0.")
@@ -800,7 +800,7 @@ class MinMaxOptProb2D:
                 self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params, self.key)
                 if self.use_importance_sampling:
                     self.update_importance_probs(loss_each_elem)
-            if self.pre_train == 'u_ref':
+            if self.pre_train is not None and grade_idx == 0:
                 plot_u_theta_mesh(   
                     model=self.model,
                     M_t=self.M_t,
