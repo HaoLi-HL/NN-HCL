@@ -717,7 +717,7 @@ class MinMaxOptProb2D:
         def pre_loss(params):
             loss_eqn = self.loss_fn_pinn(params, quad_points=pwp_pinn.quad_points, quad_weights=pwp_pinn.quad_weights)
             loss_ic = self.loss_fn_ic(params)
-            loss_bc = self.loss_fn_bc(params)
+            loss_bc = self.loss_fn_bc_Dirichlet(params)
             total_loss = self.lambda_eqn * loss_eqn + self.lambda_ic * loss_ic + self.lambda_bc * loss_bc
             return total_loss, (loss_eqn, loss_ic+loss_bc)
 
