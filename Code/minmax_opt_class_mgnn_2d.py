@@ -232,7 +232,7 @@ class MinMaxOptProb2D:
 
     def update_importance_probs(self, loss_all_elems):
         print(f"Updating importance sampling probabilities...")
-        weights = jnp.maximum(jnp.abs(loss_all_elems), 1e-6)  # Avoid zero
+        weights = jnp.maximum(jnp.abs(loss_all_elems), 1e-7)  # Avoid zero
         self.importance_probs = weights / jnp.sum(weights)
 
     def gen_ibc(self):
