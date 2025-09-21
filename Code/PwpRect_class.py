@@ -3,7 +3,7 @@ from jax import vmap
 import numpy as np
 
 class PiecewiseLinearPolynomialsRect:
-    def __init__(self, N_t, N_x, t_min=0.0, t_max=1.0, x_min=-1.0, x_max=1.0, rf_times=3, bdry_order=3, dg_type='Q1'):
+    def __init__(self, N_t, N_x, t_min=0.0, t_max=1.0, x_min=-1.0, x_max=1.0, rf_times=3, bdry_rf_times=3, dg_type='Q1'):
         """
         Initialize a rectangular mesh with custom ranges.
 
@@ -15,7 +15,7 @@ class PiecewiseLinearPolynomialsRect:
             x_min: Minimum value for x (default: -1.0).
             x_max: Maximum value for x (default: 1.0).
             rf_times: Refinement level for composite quadrature. 
-            bdry_order: Order of boundary quadrature (number of points per edge, default: 3).
+            bdry_rf_times: Order of boundary quadrature (number of points per edge, default: 3).
         """
         self.N_t = N_t
         self.N_x = N_x
@@ -24,7 +24,7 @@ class PiecewiseLinearPolynomialsRect:
         self.x_min = x_min
         self.x_max = x_max
         self.rf_times = rf_times
-        self.bdry_order = bdry_order
+        self.bdry_rf_times = bdry_rf_times
         self.N_elements = N_t * N_x  # Number of rectangles
         self.partitions = self._generate_rectangles()
         if dg_type == 'Q1':
@@ -100,90 +100,77 @@ class PiecewiseLinearPolynomialsRect:
 
     def get_boundary_quadrature(self):
         """
-        Setup Gauss quadrature points and weights for the boundaries of the rectangular mesh.
+        Generate composite trapezoidal quadrature points and weights for the boundary of each rectangle.
 
         Returns:
-            bdry_points_parti: Boundary quadrature points per rectangle, shape (N_elements, 4 * bdry_order, 2).
-            bdry_weights_parti: Boundary quadrature weights per rectangle, shape (N_elements, 4 * bdry_order).
+            bdry_points_parti: Quadrature points per rectangle per edge, shape (N_elements, 4, Nq_edge, 2).
+            bdry_weights_parti: Quadrature weights per rectangle per edge, shape (N_elements, 4, Nq_edge).
         """
-        # Gauss-Legendre nodes and weights in [-1, 1]
-        nodes, weights = np.polynomial.legendre.leggauss(self.bdry_order)
-        nodes_jnp = jnp.array(nodes)
-        weights_jnp = jnp.array(weights)
+        k = self.bdry_rf_times
+        num_intervals = 2 ** k
+        num_points = num_intervals + 1
+        Nq_edge = num_points
 
-        def boundary_quad(rect):
-            t_low, x_low = rect[0]
-            t_high, x_high = rect[3]
-            points_list = []
-            weights_list = []
+        edges_info = jnp.array([
+            [0, 0, 1],  # low t: fixed dim 0 (t) low, vary dim 1 (x)
+            [0, 1, 1],  # high t: fixed dim 0 high, vary dim 1
+            [1, 0, 0],  # low x: fixed dim 1 (x) low, vary dim 0 (t)
+            [1, 1, 0],  # high x: fixed dim 1 high, vary dim 0
+        ])
 
-            # Bottom edge: t = t_low, x varies
-            scale_x = (x_high - x_low) / 2
-            center_x = (x_high + x_low) / 2
-            x_points = center_x + nodes_jnp * scale_x
-            t_points = jnp.full(self.bdry_order, t_low)
-            points = jnp.stack([t_points, x_points], axis=1)
-            points_list.append(points)
-            w_x = weights_jnp * scale_x
-            weights_list.append(w_x)
+        def edge_quad(rect, info):
+            fixed_dim = info[0].astype(jnp.int32)
+            fixed_sign = info[1].astype(jnp.int32)
+            vary_dim = info[2].astype(jnp.int32)
+            lows = rect[0]
+            highs = rect[3]
+            fixed_val = jnp.where(fixed_sign == 0, lows[fixed_dim], highs[fixed_dim])
+            interval = (highs[vary_dim] - lows[vary_dim]) / num_intervals
+            grid = lows[vary_dim] + jnp.arange(num_points) * interval
+            points = jnp.full((Nq_edge, 2), fixed_val)
+            points = points.at[:, vary_dim].set(grid)
+            wb = jnp.full(num_points, interval)
+            wb = wb.at[0].set(interval / 2)
+            wb = wb.at[-1].set(interval / 2)
+            weights = wb
+            return points, weights
 
-            # Top edge: t = t_high, x varies
-            x_points = center_x + nodes_jnp * scale_x
-            t_points = jnp.full(self.bdry_order, t_high)
-            points = jnp.stack([t_points, x_points], axis=1)
-            points_list.append(points)
-            weights_list.append(w_x)
+        def compute_for_info(info):
+            return vmap(lambda rect: edge_quad(rect, info))(self.partitions)
 
-            # Left edge: x = x_low, t varies
-            scale_t = (t_high - t_low) / 2
-            center_t = (t_high + t_low) / 2
-            t_points = center_t + nodes_jnp * scale_t
-            x_points = jnp.full(self.bdry_order, x_low)
-            points = jnp.stack([t_points, x_points], axis=1)
-            points_list.append(points)
-            w_t = weights_jnp * scale_t
-            weights_list.append(w_t)
-
-            # Right edge: x = x_high, t varies
-            t_points = center_t + nodes_jnp * scale_t
-            x_points = jnp.full(self.bdry_order, x_high)
-            points = jnp.stack([t_points, x_points], axis=1)
-            points_list.append(points)
-            weights_list.append(w_t)
-
-            all_points = jnp.vstack(points_list)
-            all_weights = jnp.concatenate(weights_list)
-            return all_points, all_weights
-
-        bdry_points_parti, bdry_weights_parti = vmap(boundary_quad)(self.partitions)
+        points_parti, weights_parti = vmap(compute_for_info)(edges_info)
+        bdry_points_parti = jnp.transpose(points_parti, (1, 0, 2, 3))
+        bdry_weights_parti = jnp.transpose(weights_parti, (1, 0, 2))
         return bdry_points_parti, bdry_weights_parti
 
     def compute_normals(self):
         """
-        Compute outward normal vectors for each boundary quadrature point.
+        Compute outward unit normals for each edge of each rectangle.
 
         Returns:
-            normals: Normal vectors, shape (N_elements, 4 * bdry_order, 2).
+            normals: Outward unit normals, shape (N_elements, 4, 2).
         """
-        N_bd_per_face = self.bdry_order
-        normals_list = []
+        edge_vertex_indices = jnp.array([
+            [0, 1],  # low t (bottom)
+            [2, 3],  # high t (top)
+            [0, 2],  # low x (left)
+            [1, 3],  # high x (right)
+        ])
 
-        # Bottom: (-1, 0)
-        normals_bottom = jnp.tile(jnp.array([-1.0, 0.0]), (N_bd_per_face, 1))
-        normals_list.append(normals_bottom)
+        def compute_normal(rect, edge_idx):
+            verts_idx = edge_vertex_indices[edge_idx]
+            points = rect[verts_idx]
+            u = points[1] - points[0]
+            n = jnp.array([-u[1], u[0]])  # Rotate 90 degrees counterclockwise
+            n = n / jnp.linalg.norm(n + 1e-12)  # Avoid division by zero
+            elem_center = jnp.mean(rect, axis=0)
+            edge_center = jnp.mean(points, axis=0)
+            vec = edge_center - elem_center
+            # If dot < 0, flip to make outward
+            n = jnp.where(jnp.dot(n, vec) < 0, -n, n)
+            return n
 
-        # Top: (1, 0)
-        normals_top = jnp.tile(jnp.array([1.0, 0.0]), (N_bd_per_face, 1))
-        normals_list.append(normals_top)
-
-        # Left: (0, -1)
-        normals_left = jnp.tile(jnp.array([0.0, -1.0]), (N_bd_per_face, 1))
-        normals_list.append(normals_left)
-
-        # Right: (0, 1)
-        normals_right = jnp.tile(jnp.array([0.0, 1.0]), (N_bd_per_face, 1))
-        normals_list.append(normals_right)
-
-        normals_per_element = jnp.vstack(normals_list)
-        normals = jnp.tile(normals_per_element[None, :, :], (self.N_elements, 1, 1))
-        return normals
+        vmap_edge = vmap(compute_normal, in_axes=(None, 0))
+        # Apply over elements
+        vmap_elem = vmap(lambda rect: vmap_edge(rect, jnp.arange(4)))
+        return vmap_elem(self.partitions)

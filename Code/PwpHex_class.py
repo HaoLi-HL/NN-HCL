@@ -3,7 +3,7 @@ from jax import vmap
 import numpy as np
 
 class PiecewiseLinearPolynomialsHex:
-    def __init__(self, N_t, N_x, N_y, t_min=0.0, t_max=1.0, x_min=-1.0, x_max=1.0, y_min=-1.0, y_max=1.0, rf_times=3, bdry_order=3, dg_type='Q1'):
+    def __init__(self, N_t, N_x, N_y, t_min=0.0, t_max=1.0, x_min=-1.0, x_max=1.0, y_min=-1.0, y_max=1.0, rf_times=2, bdry_rf_times=3, dg_type='Q1'):
         """
         Initialize a hexahedral mesh with custom ranges.
 
@@ -18,7 +18,7 @@ class PiecewiseLinearPolynomialsHex:
             y_min: Minimum value for y (default: -1.0).
             y_max: Maximum value for y (default: 1.0).
             rf_times: Refinement level for composite quadrature. 
-            bdry_order: Order of boundary quadrature (number of points per face direction, default: 3).
+            bdry_rf_times: Refinement level for boundary quadrature.
         """
         self.N_t = N_t
         self.N_x = N_x
@@ -30,7 +30,7 @@ class PiecewiseLinearPolynomialsHex:
         self.y_min = y_min
         self.y_max = y_max
         self.rf_times = rf_times
-        self.bdry_order = bdry_order
+        self.bdry_rf_times = bdry_rf_times
         self.N_elements = N_t * N_x * N_y  # Number of hexahedra
         self.partitions = self._generate_hexahedra()
         if dg_type == 'Q1':
@@ -39,8 +39,8 @@ class PiecewiseLinearPolynomialsHex:
             self.p_dof = 4
         self.coeffs = jnp.zeros((self.N_elements, self.p_dof))
         self.quad_points, self.quad_weights, self.quad_element_indices, self.quad_points_parti, self.quad_weights_parti = self._setup_quadrature()
-        # self.bdry_points_parti, self.bdry_weights_parti = self.get_boundary_quadrature()
-        # self.normals = self.compute_normals()
+        self.bdry_points_parti, self.bdry_weights_parti = self.get_boundary_quadrature()
+        self.normals = self.compute_normals()
 
     def _generate_hexahedra(self):
         """Generate the hexahedra for the mesh with custom ranges."""
@@ -109,3 +109,90 @@ class PiecewiseLinearPolynomialsHex:
         quad_element_indices = jnp.repeat(jnp.arange(self.N_elements), self.Nq)
 
         return quad_points, quad_weights, quad_element_indices, quad_points_parti, quad_weights_parti
+
+    def get_boundary_quadrature(self):
+        """
+        Generate composite trapezoidal quadrature points and weights for the boundary of each hexahedron.
+
+        Returns:
+            bdry_points_parti: Quadrature points per hexahedron per face, shape (N_elements, 6, Nq_face, 3).
+            bdry_weights_parti: Quadrature weights per hexahedron per face, shape (N_elements, 6, Nq_face).
+        """
+        k = self.bdry_rf_times
+        num_intervals = 2 ** k
+        num_points = num_intervals + 1
+        Nq_face = num_points ** 2
+
+        faces_info = jnp.array([
+            [0, 0, 1, 2],  # Face 0: fixed_dim=0 (t), fixed_sign=0 (low t), vary_dim1=1 (x), vary_dim2=2 (y)
+            [0, 1, 1, 2],  # Face 1: fixed_dim=0 (t), fixed_sign=1 (high t), vary_dim1=1 (x), vary_dim2=2 (y)
+            [1, 0, 0, 2],  # Face 2: fixed_dim=1 (x), fixed_sign=0 (low x), vary_dim1=0 (t), vary_dim2=2 (y)
+            [1, 1, 0, 2],  # Face 3: fixed_dim=1 (x), fixed_sign=1 (high x), vary_dim1=0 (t), vary_dim2=2 (y)
+            [2, 0, 0, 1],  # Face 4: fixed_dim=2 (y), fixed_sign=0 (low y), vary_dim1=0 (t), vary_dim2=1 (x)
+            [2, 1, 0, 1],  # Face 5: fixed_dim=2 (y), fixed_sign=1 (high y), vary_dim1=0 (t), vary_dim2=1 (x)
+        ])
+
+        def face_quad(hex, info):
+            fixed_dim = info[0].astype(jnp.int32)
+            fixed_sign = info[1].astype(jnp.int32)
+            vary_dims = info[2:4].astype(jnp.int32)
+            lows = hex[0]
+            highs = hex[-1]
+            fixed_val = jnp.where(fixed_sign == 0, lows[fixed_dim], highs[fixed_dim])
+            intervals = (highs[vary_dims] - lows[vary_dims]) / num_intervals
+            grids = [lows[d] + jnp.arange(num_points) * intervals[j] for j, d in enumerate(vary_dims)]
+            w_base = []
+            for j in range(2):
+                wb = jnp.full(num_points, intervals[j])
+                wb = wb.at[0].set(intervals[j] / 2)
+                wb = wb.at[-1].set(intervals[j] / 2)
+                w_base.append(wb)
+            gg1, gg2 = jnp.meshgrid(grids[0], grids[1], indexing='ij')
+            points = jnp.full((Nq_face, 3), fixed_val)
+            points = points.at[:, vary_dims[0]].set(gg1.ravel())
+            points = points.at[:, vary_dims[1]].set(gg2.ravel())
+            weights_2d = w_base[0][:, None] * w_base[1][None, :]
+            weights = weights_2d.ravel()
+            return points, weights
+
+        def compute_for_info(info):
+            return vmap(lambda hex: face_quad(hex, info))(self.partitions)
+
+        points_parti, weights_parti = vmap(compute_for_info)(faces_info)
+        bdry_points_parti = jnp.transpose(points_parti, (1, 0, 2, 3))
+        bdry_weights_parti = jnp.transpose(weights_parti, (1, 0, 2))
+        return bdry_points_parti, bdry_weights_parti
+
+    def compute_normals(self):
+        """
+        Compute outward unit normals for each face of each hexahedron.
+
+        Returns:
+            normals: Outward unit normals, shape (N_elements, 6, 3).
+        """
+        face_vertex_indices = jnp.array([
+            [0, 1, 2, 3],  # low t
+            [4, 5, 6, 7],  # high t
+            [0, 1, 4, 5],  # low x
+            [2, 3, 6, 7],  # high x
+            [0, 2, 4, 6],  # low y
+            [1, 3, 5, 7],  # high y
+        ])
+
+        def compute_normal(hex, face_idx):
+            verts_idx = face_vertex_indices[face_idx]
+            points = hex[verts_idx]
+            u = points[1] - points[0]
+            v = points[2] - points[0]
+            n = jnp.cross(u, v)
+            n = n / jnp.linalg.norm(n + 1e-12)  # Avoid division by zero
+            elem_center = (hex[0] + hex[-1]) / 2
+            face_center = jnp.mean(points, axis=0)
+            vec = face_center - elem_center
+            # If dot < 0, flip to make outward
+            n = jnp.where(jnp.dot(n, vec) < 0, -n, n)
+            return n
+
+        vmap_face = vmap(compute_normal, in_axes=(None, 0))
+        vmap_elem = vmap(lambda hex: vmap_face(hex, jnp.arange(6)))
+        return vmap_elem(self.partitions)

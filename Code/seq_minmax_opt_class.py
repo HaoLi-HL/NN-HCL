@@ -22,7 +22,7 @@ class SeqMinMaxOptProb:
                  lambda_ic=20.0, lambda_bc=20.0, lambda_eqn=1.0, alpha=0.9, gamma=0.0, N_test_gamma=1000, adjust_gamma=True,
                  L1reg=0, sampling_method='uniform', notes='', nu=1e-3,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
-                 res=None, bc_type='Dirichlet',loss_type='interior',  k=0, use_a=True, f_plot=1000, plt_err_dist=False, plt_mesh=False,
+                 flux=None, res=None, bc_type='Dirichlet',loss_type='interior',  k=0, use_a=True, f_plot=1000, plt_err_dist=False, plt_mesh=False,
                  partition='tri', dg_type='P1', use_importance_sampling=False, u_ref=None, pre_epochs=1000, pre_train='',
                  M_t=1000, M_x=2000, set_wandb=False):
         """
@@ -96,6 +96,7 @@ class SeqMinMaxOptProb:
         self.decay_rate_stage2 = decay_rate_stage2
         self.f_adaptive_weight = f_adaptive_weight
         self.f_opt_kh = f_opt_kh
+        self.flux = flux
         self.res = res
         self.bc_type = bc_type  # 'Dirichlet' or 'inflow'
         self.loss_type = loss_type
@@ -181,7 +182,8 @@ class SeqMinMaxOptProb:
                 L1reg=self.L1reg, sampling_method=self.sampling_method, notes=self.notes, nu=self.nu,
                 init_lrs=self.init_lrs, grade_epochs=grade_epochs, decay_rates=self.decay_rates, 
                 init_lr_stage2=self.init_lr_stage2, epoch_stage2=epoch_stage2, decay_rate_stage2=self.decay_rate_stage2,
-                f_adaptive_weight=self.f_adaptive_weight, f_opt_kh=self.f_opt_kh, res=self.res, bc_type=self.bc_type,
+                f_adaptive_weight=self.f_adaptive_weight, f_opt_kh=self.f_opt_kh, 
+                flux=self.flux, res=self.res, bc_type=self.bc_type,
                 loss_type=self.loss_type, k=self.k, use_a=self.use_a, 
                 f_plot=self.f_plot, plt_err_dist=self.plt_err_dist, plt_mesh=self.plt_mesh, partition=self.partition, p_dof=self.p_dof, dg_type=self.dg_type,
                 use_importance_sampling=self.use_importance_sampling, 
@@ -258,6 +260,7 @@ def save_seq_model(seq_obj, model_path_prefix):
             'u0': seq_obj.u0,
             'u1': seq_obj.u1,
             'u2': seq_obj.u2,
+            'flux': seq_obj.flux,
             'res': seq_obj.res,
             'N_t': seq_obj.N_t,
             'N_x': seq_obj.N_x,

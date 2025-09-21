@@ -34,7 +34,7 @@ class MinMaxOptProb2D:
                  lambda_ic=20.0, lambda_bc=20.0, lambda_eqn=1.0, alpha=0.9, gamma=0.0, N_test_gamma=1000, adjust_gamma=True,
                  L1reg=0, sampling_method='uniform', notes='', nu=1e-3,
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
-                 res=None, bc_type='Dirichlet', loss_type='interior', k=0, use_a=True, M_t = 1000, M_x = 1000, f_plot=1000, plt_err_dist=False, plt_mesh=False,
+                 flux=None, res=None, bc_type='Dirichlet', loss_type='interior', k=0, use_a=True, M_t = 1000, M_x = 1000, f_plot=1000, plt_err_dist=False, plt_mesh=False,
                  partition='tri', p_dof=None, dg_type='P1', use_importance_sampling=False, u_ref=None, pre_epochs=1000, pre_train='',
                  seq_train=False, set_wandb=False):
         self.input_dim = input_dim
@@ -121,6 +121,7 @@ class MinMaxOptProb2D:
         self.f_adaptive_weight = f_adaptive_weight
         self.f_opt_kh = f_opt_kh
         self.alpha = alpha
+        self.flux = flux
         self.res = res
         self.loss_type = loss_type
 
@@ -141,6 +142,10 @@ class MinMaxOptProb2D:
             self.loss_fn_eqn = self.loss_fn_elem_bdry
         elif self.loss_type == 'pinn':
             self.loss_fn_eqn = self.loss_fn_pinn
+        elif self.loss_type == 'cai':
+            self.loss_fn_eqn = self.loss_fn_cai
+        else:
+            raise ValueError("loss_type must be in ['interior', 'boundary', 'pinn', 'cai'].")
 
         if self.gamma > 0.0:
             self.loss_fn = self.loss_fn_gamma
@@ -278,6 +283,7 @@ class MinMaxOptProb2D:
             elif self.input_dim == 3:
                 return jnp.trace(hess[:, 1:, 1:], axis1=1, axis2=2)
         self.laplacian = jit(laplacian_fn)
+        self.space_time_flux = jit(vmap(lambda u: np.array([u, self.flux(u)])))
 
     def maximize_kh_step(self, params, current_key):
         Nt = self.pwp.N_elements
@@ -752,6 +758,26 @@ class MinMaxOptProb2D:
         interior_loss = jnp.dot(quad_weights, residual**2)
         return interior_loss
     
+    def loss_fn_cai(self, params, importance_probs=None, current_key=None):
+        """Loss function from Cai's paper."""
+
+        # Compute flux for a single face of a single element
+        def face_flux(e, f):
+            points = self.pwp.bdry_points_parti[e, f]
+            weights = self.pwp.bdry_weights_parti[e, f]
+            normal = self.pwp.normals[e, f]
+            u_quad = self.u_eval(params, points)
+            F_vals = self.space_time_flux(u_quad)
+            dots = jnp.einsum('nd,d->n', F_vals, normal)  # F · n for each point
+            return jnp.sum(dots * weights)
+        
+        # Sum over all 6 faces for a single element
+        def elem_flux(e):
+            return jnp.sum(vmap(lambda f: face_flux(e, f))(jnp.arange(2*self.input_dim)))
+
+        interior_loss = jnp.sum((vmap(elem_flux)(jnp.arange(self.pwp.N_elements)))**2)
+        return interior_loss
+    
     # @partial(jax.jit, static_argnames=['self', 'optimizer'])
     def train_step(self, params, optimizer, opt_state, importance_probs=None, current_key=None):
         if self.use_importance_sampling:
@@ -796,7 +822,7 @@ class MinMaxOptProb2D:
 
             self.gen_funcs(grade_idx)
             self.maximize_kh = jit(self.maximize_kh_step)
-            if self.loss_type != 'pinn':
+            if self.loss_type not in ['pinn', 'cai']:
                 self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params, self.key)
                 if self.use_importance_sampling:
                     self.update_importance_probs(loss_each_elem)
@@ -828,7 +854,7 @@ class MinMaxOptProb2D:
                     loss_eqn, loss_ibc, self.key, params, opt_state = self.train_step(params, optimizer, opt_state, self.importance_probs, self.key)
                 else:
                     loss_eqn, loss_ibc, params, opt_state = self.train_step(params, optimizer, opt_state)
-                if iter % self.f_opt_kh == 0 and self.loss_type != 'pinn':
+                if iter % self.f_opt_kh == 0 and self.loss_type not in ['pinn', 'cai']:
                     self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params, self.key)
                 loss_eqn = self.loss_fn_eqn(params)
                 self.loss_eqn_history[grade_idx].append(loss_eqn)
@@ -839,7 +865,7 @@ class MinMaxOptProb2D:
                         self.best_params_list[grade_idx] = jax.tree_util.tree_map(jnp.copy, params)
 
                 if iter % 100 == 0:
-                    if self.loss_type == 'pinn':
+                    if self.loss_type in ['pinn', 'cai']:
                         print(f"Grade {grade_idx}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_ibc: {loss_ibc:.6f}")
                     else:
                         if self.use_importance_sampling:
@@ -906,7 +932,7 @@ class MinMaxOptProb2D:
             self.opt_state_stage2 = self.optimizer_stage2.init(params_last_k)
             optimizer = self.optimizer_stage2
             opt_state = self.opt_state_stage2
-            if self.loss_type != 'pinn':
+            if self.loss_type not in ['pinn', 'cai']:
                 self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1 = self.maximize_kh(params_last_k, self.key)
             monitor_start = int(0.9 * self.epoch_stage2)
             best_loss_eqn = float('inf')
@@ -916,7 +942,7 @@ class MinMaxOptProb2D:
                     self.update_adaptive_weights(params_last_k)
                     print(f"Stage 2, Iter {iter}, lambda_ic: {self.lambda_ic:.6f}, lambda_bc: {self.lambda_bc:.6f}, lambda_eqn: {self.lambda_eqn:.6f}")
                 loss_eqn, loss_ibc, params_last_k, opt_state = self.train_step(params_last_k, optimizer, opt_state)
-                if iter % self.f_opt_kh == 0 and self.loss_type != 'pinn':
+                if iter % self.f_opt_kh == 0 and self.loss_type not in ['pinn', 'cai']:
                     self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1 = self.maximize_kh(params_last_k, self.key)
                 loss_eqn = loss_eqn_fn(params_last_k)
                 loss_ibc = loss_data_fn(params_last_k)
@@ -999,13 +1025,13 @@ class MinMaxOptProb2D:
             # Collect loss history
             loss_history_data = []
             loss_history_eqn = []
-            if self.loss_type != 'pinn':
+            if self.loss_type not in ['pinn', 'cai']:
                 self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1 = self.maximize_kh(current_params, self.key)
             for iter in range(self.N_test_gamma):
                 (loss, (loss_eqn, loss_data)), grads = jax.value_and_grad(total_loss, has_aux=True)(current_params)
                 updates, current_opt_state = optimizer.update(grads, current_opt_state)
                 current_params = optax.apply_updates(current_params, updates)
-                if iter % self.f_opt_kh == 0 and self.loss_type != 'pinn':
+                if iter % self.f_opt_kh == 0 and self.loss_type not in ['pinn', 'cai']:
                     self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1 = self.maximize_kh(current_params, self.key)
                 # Store losses
                 loss_eqn = loss_eqn_fn(current_params)
@@ -1013,7 +1039,7 @@ class MinMaxOptProb2D:
                 loss_history_data.append(loss_data)
                 loss_history_eqn.append(loss_eqn)
                 if iter % 100 == 0:
-                    if self.loss_type == 'pinn':
+                    if self.loss_type in ['pinn', 'cai']:
                         print(f"Gamma {gamma}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_ibc: {loss_data:.6f}")
                     else:
                         print(f"Gamma {gamma}, Iter {iter}, loss_eqn: {loss_eqn:.6f}, loss_eqn_from_kh: {loss_eqn_from_kh:.6f}, loss_l1: {loss_l1:.6f}, loss_ibc: {loss_data:.6f}")
