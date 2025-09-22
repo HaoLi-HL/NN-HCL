@@ -283,7 +283,10 @@ class MinMaxOptProb2D:
             elif self.input_dim == 3:
                 return jnp.trace(hess[:, 1:, 1:], axis1=1, axis2=2)
         self.laplacian = jit(laplacian_fn)
-        self.space_time_flux = jit(vmap(lambda u: np.array([u, self.flux(u)])))
+        if self.input_dim == 2:
+            self.space_time_flux = jit(vmap(lambda u: jnp.array([u, self.flux(u)])))
+        elif self.input_dim == 3:
+            self.space_time_flux = jit(vmap(lambda u: jnp.array([u, self.flux(u)[0], self.flux(u)[1]])))
 
     def maximize_kh_step(self, params, current_key):
         Nt = self.pwp.N_elements
