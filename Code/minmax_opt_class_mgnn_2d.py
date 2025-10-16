@@ -762,7 +762,7 @@ class MinMaxOptProb2D:
         return interior_loss
     
     def loss_fn_cai(self, params, importance_probs=None, current_key=None):
-        """Loss function from Cai's paper."""
+        """Loss function from Cai's paper arXiv:2110.10895."""
 
         # Compute flux for a single face of a single element
         def face_flux(e, f):
