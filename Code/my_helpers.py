@@ -143,7 +143,7 @@ def plot_u_theta(prob, params=None, M_t=1000, M_t_per_segment=1000, M_x=2000, t_
         # Calculate t_range for figure sizes
         t_range = t_max - t_min
         # First figure: 2D color mesh plot
-        fig1 = plt.figure(figsize=(10, 5 * t_range if t_range > 0 else 4))
+        fig1 = plt.figure(figsize=(10, 5 * t_range if t_range > 0.2 else 4))
         ax1 = fig1.add_subplot(111)
         pcm = ax1.pcolormesh(x_grid, t_grid, u_values, shading='nearest', cmap='viridis')
         pcm.set_rasterized(True) # Rasterize the mesh to reduce EPS size

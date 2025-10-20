@@ -82,10 +82,10 @@ class MinMaxOptProb2D:
         if self.partition == 'tri' and self.input_dim == 2:
             self.pwp = PiecewiseLinearPolynomialsTri(N_t, N_x, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, rf_times=k_h_rf_times)
         elif self.partition == 'rect' and self.input_dim == 2:
-            self.pwp = PiecewiseLinearPolynomialsRect(N_t, N_x, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, rf_times=k_h_rf_times, 
+            self.pwp = PiecewiseLinearPolynomialsRect(N_t, N_x, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, rf_times=k_h_rf_times, bdry_rf_times=k_h_rf_times,
                                                       dg_type=self.dg_type)
         elif self.partition == 'hex' and self.input_dim == 3:
-            self.pwp = PiecewiseLinearPolynomialsHex(N_t, N_x, self.N_y, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, y_min=self.y_min, y_max=self.y_max, rf_times=k_h_rf_times, 
+            self.pwp = PiecewiseLinearPolynomialsHex(N_t, N_x, self.N_y, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, y_min=self.y_min, y_max=self.y_max, rf_times=k_h_rf_times, bdry_rf_times=k_h_rf_times,
                                                      dg_type=self.dg_type)
         elif self.partition == 'tetra' and self.input_dim == 3:
             self.pwp = PiecewiseLinearPolynomialsTetra(N_t, N_x, self.N_y, t_min=t_min, t_max=t_max, x_min=x_min, x_max=x_max, y_min=self.y_min, y_max=self.y_max, quad_order=k_h_rf_times, 
