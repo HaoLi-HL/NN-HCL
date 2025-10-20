@@ -235,6 +235,10 @@ class MinMaxOptProb2D:
         self.vmap_loss_fn_elem_int_per_elem = vmap(self.loss_fn_elem_int_per_elem, in_axes=(0, 0, None))
         print(f"Partition type: {self.partition}, dg_type: {self.dg_type}, p_dof: {self.p_dof}")
 
+        if self.plt_err_dist and self.loss_type not in ['pinn', 'cai']:
+            self.plt_err_dist = False
+            print(f"Warning: plt_err_dist is not available for 'pinn' or 'cai' loss types. Setting plt_err_dist to False.")
+
     def update_importance_probs(self, loss_all_elems):
         print(f"Updating importance sampling probabilities...")
         weights = jnp.maximum(jnp.abs(loss_all_elems), 1e-7)  # Avoid zero
@@ -829,7 +833,7 @@ class MinMaxOptProb2D:
                 self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params, self.key)
                 if self.use_importance_sampling:
                     self.update_importance_probs(loss_each_elem)
-            if self.pre_train is not None and grade_idx == 0:
+            if self.pre_train and grade_idx == 0:
                 plot_u_theta_mesh(   
                     model=self.model,
                     M_t=self.M_t,
