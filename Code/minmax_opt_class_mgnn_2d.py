@@ -235,7 +235,7 @@ class MinMaxOptProb2D:
         self.vmap_loss_fn_elem_int_per_elem = vmap(self.loss_fn_elem_int_per_elem, in_axes=(0, 0, None))
         print(f"Partition type: {self.partition}, dg_type: {self.dg_type}, p_dof: {self.p_dof}")
 
-        if self.plt_err_dist and self.loss_type not in ['pinn', 'cai']:
+        if self.plt_err_dist and self.loss_type in ['pinn', 'cai']:
             self.plt_err_dist = False
             print(f"Warning: plt_err_dist is not available for 'pinn' or 'cai' loss types. Setting plt_err_dist to False.")
 
