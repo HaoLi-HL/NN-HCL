@@ -482,88 +482,143 @@ def compute_errors(model, u_ref=None, file_path='data/burgers_sin_ref.npz', para
     return err_T, err_spacetime
 
 
-def compute_errors_combined_u_theta(seq_model, u_ref=None, file_path='data/burgers_sin_ref.npz', T=None, x_min=-1.0, x_max=1.0, M_x=601):
+def compute_errors_combined_u_theta(seq_model, u_ref=None, file_path='data/burgers_sin_ref.npz', T=None, x_min=-1.0, x_max=1.0, y_min=-1.0, y_max=1.0, M_x=601, M_y=601, error_type='L1'):
     """
     Compute the relative error at time T and the space-time relative error between
     the neural network approximation u* and the reference solution u.
 
     Args:
         seq_model: Instance of SeqMinMaxOptProb representing the combined neural networks.
-        u_ref: Reference function u_ref(t, x) where t is scalar and x is array (default: None).
-        file_path: Path to the .npz file containing 'times', 'x', and 'u' (default: 'data/burgers_sin_ref.npz').
+        u_ref: Reference function u_ref(t, x) or u_ref(t, x, y) where t is scalar and x/y are arrays (default: None).
+        file_path: Path to the .npz file containing 'times', 'x', 'y' (if 3D), and 'u' (default: 'data/burgers_sin_ref.npz').
         T: The final time for the error at T. If None, uses the maximum time in the data or seq_model.total_t_max (default: None).
         x_min: Minimum x value (default: -1.0).
         x_max: Maximum x value (default: 1.0).
+        y_min: Minimum y value for 3D (default: -1.0).
+        y_max: Maximum y value for 3D (default: 1.0).
         M_x: Number of x grid points (default: 601).
+        M_y: Number of y grid points for 3D (default: 601).
+        error_type: 'L1' for L1 norm or 'L2' for L2 norm (default: 'L1').
 
     Returns:
         err_T: Relative error at time T.
         err_spacetime: Space-time relative error.
     """
+    input_dim = seq_model.segments[0].input_dim if seq_model.segments else 2  # Assume first segment's dim
     # Load numerical solution data or use reference function
     if u_ref is None:
         data = np.load(file_path)
         times = data['times']
         x = data['x']
-        u_num = data['u']  # Shape: (n_times, n_x)
+        if input_dim == 3:
+            y = data['y']
+            u_num = data['u']  # Shape: (n_times, n_x, n_y)
+        else:
+            u_num = data['u']  # Shape: (n_times, n_x)
     else:
-        T = seq_model.total_t_max if T is None else T
-        times = np.linspace(seq_model.total_t_min, T, M_x)
-        x = np.linspace(seq_model.x_min, seq_model.x_max, M_x)
-        u_num = np.array([u_ref(t, x) for t in times])  # Shape: (n_times, n_x)
+        x = np.linspace(x_min, x_max, M_x)
+        if input_dim == 3:
+            y = np.linspace(y_min, y_max, M_y)
+            times = np.linspace(seq_model.total_t_min, seq_model.total_t_max, M_x) if T is None else np.array([T])
+            u_num = np.array([u_ref(t, x, y) for t in times])  # Need to define 3D grid
+        else:
+            times = np.linspace(seq_model.total_t_min, seq_model.total_t_max, M_x) if T is None else np.array([T])
+            u_num = np.array([u_ref(t, x) for t in times])  # Shape: (len(times), M_x)
 
     if T is None:
         T = times[-1]
 
-    # Create grid for evaluation (matching the numerical grid)
-    t_grid, x_grid = np.meshgrid(times, x, indexing='ij')  # Shapes: (n_t, n_x)
-    tx_points = np.stack([t_grid.ravel(), x_grid.ravel()], axis=1)  # Shape: (n_t * n_x, 2)
+    # Create grid for evaluation
+    if input_dim == 2:
+        t_grid, x_grid = np.meshgrid(times, x, indexing='ij')
+        points = np.stack([t_grid.ravel(), x_grid.ravel()], axis=1)  # (n_t * n_x, 2)
+    else:
+        t_grid, x_grid, y_grid = np.meshgrid(times, x, y, indexing='ij')
+        points = np.stack([t_grid.ravel(), x_grid.ravel(), y_grid.ravel()], axis=1)  # (n_t * n_x * n_y, 3)
 
     # Determine which segment each time point belongs to
-    segment_indices = jnp.digitize(tx_points[:, 0], seq_model.seq_T, right=True) - 1
-    segment_indices = jnp.clip(segment_indices, 0, seq_model.num_segments - 1)
+    segment_indices = np.digitize(points[:, 0], seq_model.seq_T, right=True) - 1
+    segment_indices = np.clip(segment_indices, 0, seq_model.num_segments - 1)
 
     # Collect outputs from each segment
     u_star_values = []
     for i in range(seq_model.num_segments):
         mask = (segment_indices == i)
-        tx_points_segment = tx_points[mask]
-        if tx_points_segment.size > 0:
+        points_segment = points[mask]
+        if points_segment.size > 0:
             segment = seq_model.segments[i]
-            u_values_segment = segment.model.forward(tx_points_segment)
+            u_values_segment = segment.model.forward(points_segment)
             u_star_values.append(u_values_segment)
 
     # Combine all segment outputs into a single array
     u_star_values = jnp.concatenate(u_star_values)
     u_star_values = np.asarray(u_star_values).squeeze()  # Ensure it's 1D array
-    u_star = u_star_values.reshape(len(times), len(x))  # Shape: (n_t, n_x)
+    if input_dim == 2:
+        u_star = u_star_values.reshape(len(times), len(x))  # Shape: (n_t, n_x)
+    else:
+        u_star = u_star_values.reshape(len(times), len(x), len(y))  # Shape: (n_t, n_x, n_y)
 
     # Compute relative error at t = T
     idx_T = np.argmin(np.abs(times - T))
-    u_T = u_num[idx_T, :]
-    u_star_T = u_star[idx_T, :]
-    num_T = np.trapezoid(np.abs(u_star_T - u_T), x)
-    den_T = np.trapezoid(np.abs(u_T), x)
+    if input_dim == 2:
+        u_T = u_num[idx_T, :]
+        u_star_T = u_star[idx_T, :]
+        if error_type == 'L1':
+            num_T = np.trapezoid(np.abs(u_star_T - u_T), x)
+            den_T = np.trapezoid(np.abs(u_T), x)
+        elif error_type == 'L2':
+            num_T = np.sqrt(np.trapezoid((u_star_T - u_T)**2, x))
+            den_T = np.sqrt(np.trapezoid(u_T**2, x))
+        else:
+            raise ValueError("error_type must be 'L1' or 'L2'")
+    else:
+        u_T = u_num[idx_T, :, :]
+        u_star_T = u_star[idx_T, :, :]
+        if error_type == 'L1':
+            num_T = np.trapezoid(np.trapezoid(np.abs(u_star_T - u_T), y, axis=1), x, axis=0)
+            den_T = np.trapezoid(np.trapezoid(np.abs(u_T), y, axis=1), x, axis=0)
+        elif error_type == 'L2':
+            num_T = np.sqrt(np.trapezoid(np.trapezoid((u_star_T - u_T)**2, y, axis=1), x, axis=0))
+            den_T = np.sqrt(np.trapezoid(np.trapezoid(u_T**2, y, axis=1), x, axis=0))
+        else:
+            raise ValueError("error_type must be 'L1' or 'L2'")
     err_T = num_T / den_T if den_T != 0 else np.inf
 
     # Compute space-time relative error
-    abs_diff = np.abs(u_star - u_num)  # Shape: (n_t, n_x)
-    abs_u = np.abs(u_num)
-
-    # Integrate over x for each t
-    int_x_abs_diff = np.trapezoid(abs_diff, x, axis=1)  # Shape: (n_t,)
-    int_x_abs_u = np.trapezoid(abs_u, x, axis=1)
-
-    # Integrate over t
-    spacetime_num = np.trapezoid(int_x_abs_diff, times)
-    spacetime_den = np.trapezoid(int_x_abs_u, times)
+    if input_dim == 2:
+        abs_diff = np.abs(u_star - u_num)  # Shape: (n_t, n_x)
+        abs_u = np.abs(u_num)
+        if error_type == 'L1':
+            int_x_abs_diff = np.trapezoid(abs_diff, x, axis=1)  # Shape: (n_t,)
+            int_x_abs_u = np.trapezoid(abs_u, x, axis=1)
+            spacetime_num = np.trapezoid(int_x_abs_diff, times)
+            spacetime_den = np.trapezoid(int_x_abs_u, times)
+        elif error_type == 'L2':
+            int_x_abs_diff = np.sqrt(np.trapezoid((u_star - u_num)**2, x, axis=1))
+            int_x_abs_u = np.sqrt(np.trapezoid(u_num**2, x, axis=1))
+            spacetime_num = np.sqrt(np.trapezoid(int_x_abs_diff**2, times))
+            spacetime_den = np.sqrt(np.trapezoid(int_x_abs_u**2, times))
+    else:
+        abs_diff = np.abs(u_star - u_num)  # Shape: (n_t, n_x, n_y)
+        abs_u = np.abs(u_num)
+        if error_type == 'L1':
+            int_xy_abs_diff = np.trapezoid(np.trapezoid(abs_diff, y, axis=2), x, axis=1)  # Shape: (n_t,)
+            int_xy_abs_u = np.trapezoid(np.trapezoid(abs_u, y, axis=2), x, axis=1)
+            spacetime_num = np.trapezoid(int_xy_abs_diff, times)
+            spacetime_den = np.trapezoid(int_xy_abs_u, times)
+        elif error_type == 'L2':
+            int_xy_abs_diff = np.sqrt(np.trapezoid(np.trapezoid((u_star - u_num)**2, y, axis=2), x, axis=1))
+            int_xy_abs_u = np.sqrt(np.trapezoid(np.trapezoid(u_num**2, y, axis=2), x, axis=1))
+            spacetime_num = np.sqrt(np.trapezoid(int_xy_abs_diff**2, times))
+            spacetime_den = np.sqrt(np.trapezoid(int_xy_abs_u**2, times))
     err_spacetime = spacetime_num / spacetime_den if spacetime_den != 0 else np.inf
 
     # Print the errors
-    print(f"Error at T: {num_T}, Relative error at T: {err_T}")
-    print(f"Space-time error: {spacetime_num}, Space-time relative error: {err_spacetime}")
+    print(f"{error_type} Error at T: {num_T}, Relative {error_type} error at T: {err_T}")
+    print(f"Space-time {error_type} error: {spacetime_num}, Space-time relative {error_type} error: {err_spacetime}")
 
     return err_T, err_spacetime
+
 
 def plot_comparison_together(prob, u_ref=None, file_path='data/burgers_sin_ref.npz', 
                              params=None, ts=None, save_path='data/sine_wave_plot_together.eps', title=None, x_min=-1.0, x_max=1.0, M_x=601, tol=1e-6, fontsize=16):
