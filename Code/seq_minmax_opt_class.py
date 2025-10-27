@@ -144,9 +144,9 @@ class SeqMinMaxOptProb:
                                "sampling_method": sampling_method,
                               })
 
-    def train_seq(self, grade_epochs=None, epoch_stage2=None, save_model=True):
+    def train_seq(self, sqgment_start=0, sqgment_end=None, grade_epochs=None, epoch_stage2=None, save_model=True):
         """
-        Train all segments sequentially, copying the previous segment's parameters to the next.
+        Train all segments sequentially.
 
         Args:
             save_model (bool): Whether to save model parameters.
@@ -155,7 +155,8 @@ class SeqMinMaxOptProb:
             grade_epochs = self.grade_epochs
         if epoch_stage2 is None:
             epoch_stage2 = self.epoch_stage2
-        for i in range(self.num_segments):
+        sqgment_end = sqgment_end if sqgment_end is not None else self.num_segments
+        for i in range(sqgment_start, sqgment_end):
             # Define time interval for the current segment
             t_min = self.seq_T[i]
             t_max = self.seq_T[i+1]
