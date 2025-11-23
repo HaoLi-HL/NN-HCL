@@ -3,7 +3,7 @@ from jax import vmap
 import numpy as np
 
 class PiecewiseLinearPolynomialsRect:
-    def __init__(self, N_t, N_x, t_min=0.0, t_max=1.0, x_min=-1.0, x_max=1.0, rf_times=3, bdry_rf_times=3, dg_type='Q1'):
+    def __init__(self, N_t, N_x, t_min=0.0, t_max=1.0, x_min=0.0, x_max=1.0, rf_times=3, bdry_rf_times=3, dg_type='Q1'):
         """
         Initialize a rectangular mesh with custom ranges.
 
@@ -12,7 +12,7 @@ class PiecewiseLinearPolynomialsRect:
             N_x: Number of divisions along the x-axis.
             t_min: Minimum value for t (default: 0.0).
             t_max: Maximum value for t (default: 1.0).
-            x_min: Minimum value for x (default: -1.0).
+            x_min: Minimum value for x (default: 0.0).
             x_max: Maximum value for x (default: 1.0).
             rf_times: Refinement level for composite quadrature. 
             bdry_rf_times: Order of boundary quadrature (number of points per edge, default: 3).

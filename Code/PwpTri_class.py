@@ -10,7 +10,7 @@ from NN_class import MLP
 
 
 class PiecewiseLinearPolynomialsTri:
-    def __init__(self, N_t, N_x, t_min=0.0, t_max=1.0, x_min=0.0, x_max=1.0, rf_times=1, bdry_times=1):
+    def __init__(self, N_t, N_x, t_min=0.0, t_max=1.0, x_min=0.0, x_max=1.0, rf_times=1, bdry_rf_times=1):
         """
         Initialize a triangular mesh with custom ranges.
 
@@ -30,7 +30,7 @@ class PiecewiseLinearPolynomialsTri:
         self.x_min = x_min
         self.x_max = x_max
         self.rf_times = rf_times
-        self.bdry_times = bdry_times
+        self.bdry_rf_times = bdry_rf_times
         self.N_elements = 2 * N_t * N_x  # Two triangles per rectangle
         self.partitions = self._generate_partitions()
         self.coeffs = jnp.zeros((self.N_elements, 3))  # Coefficients for each triangle
@@ -147,11 +147,11 @@ class PiecewiseLinearPolynomialsTri:
         Generate composite trapezoid rule quadrature points and weights for the boundary of each triangle.
 
         Returns:
-            bdry_points_tri: Quadrature points for the boundaries, shape (N_elements, 3*(2**bdry_times + 1), 2).
-            bdry_weights_tri: Quadrature weights for the boundaries, shape (N_elements, 3*(2**bdry_times + 1)).
+            bdry_points_tri: Quadrature points for the boundaries, shape (N_elements, 3*(2**bdry_rf_times + 1), 2).
+            bdry_weights_tri: Quadrature weights for the boundaries, shape (N_elements, 3*(2**bdry_rf_times + 1)).
         """
-        bdry_times = self.bdry_times
-        n = 2 ** bdry_times  # Number of subintervals per edge
+        bdry_rf_times = self.bdry_rf_times
+        n = 2 ** bdry_rf_times  # Number of subintervals per edge
         def _edge_quadrature(v1, v2):
             """
             Compute quadrature points and weights for a single edge using the composite trapezoid rule.
