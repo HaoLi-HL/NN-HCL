@@ -127,7 +127,7 @@ def plot_u_theta(prob, params=None, M_t=1000, M_t_per_segment=1000, M_x=2000, t_
         plt.tight_layout()
         if upload_fig: wandb.log({f"u_theta_1d_tmax_{t_max:.1f}": wandb.Image(fig2)})
         plt.show()
-    if ts:
+    if isinstance(ts, jnp.ndarray):
         if is_3d:
             has_ref = (u_ref is not None) or (file_path is not None)
             u_nn_list, u_ref_list = [], []
