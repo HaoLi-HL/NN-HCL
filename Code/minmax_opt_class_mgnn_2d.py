@@ -127,8 +127,8 @@ class MinMaxOptProb2D:
 
         
         self.nu = nu
-        self.gen_ibc()
-        self.bc_type = bc_type  # 'Dirichlet' or 'inflow'
+        self.bc_type = bc_type  # 'Dirichlet', 'periodic' or 'inflow'
+        self.gen_ibc()        
         if self.bc_type == 'Dirichlet':
             self.loss_fn_bc = self.loss_fn_bc_Dirichlet
         elif self.bc_type == 'inflow':
