@@ -133,8 +133,10 @@ class MinMaxOptProb2D:
             self.loss_fn_bc = self.loss_fn_bc_Dirichlet
         elif self.bc_type == 'inflow':
             self.loss_fn_bc = self.loss_fn_bc_inflow
+        elif self.bc_type == 'periodic':
+            self.loss_fn_bc = self.loss_fn_bc_periodic
         else:
-            raise ValueError("bc_type must be 'Dirichlet' or 'inflow'.")
+            raise ValueError("bc_type must be 'Dirichlet', 'periodic' or 'inflow'.")
 
         if self.loss_type == 'interior':
             self.loss_fn_eqn = self.loss_fn_elem_int
@@ -392,6 +394,12 @@ class MinMaxOptProb2D:
             bc_loss += jnp.mean((self.u_eval(params, self.tx_y0) - self.u_y0)**2) + jnp.mean((self.u_eval(params, self.tx_y1) - self.u_y1)**2)
         return bc_loss
     
+    def loss_fn_bc_periodic(self, params):
+        bc_loss = jnp.mean((self.u_eval(params, self.tx_x0) - self.u_eval(params, self.tx_x1))**2)
+        if self.input_dim == 3:
+            bc_loss += jnp.mean((self.u_eval(params, self.tx_y0) - self.u_eval(params, self.tx_y1))**2)
+        return bc_loss
+
     def loss_fn_bc_inflow(self, params):
         bc_loss = 0.0
 
