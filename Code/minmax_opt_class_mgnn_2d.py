@@ -246,30 +246,35 @@ class MinMaxOptProb2D:
         if self.input_dim == 2:
             self.u_t0 = self.u0(self.x_bc)
             self.tx_t0 = jnp.stack([self.t_min * jnp.ones_like(self.x_bc), self.x_bc], axis=1)
-            self.u_x0 = self.u1(self.t_bc)
             self.tx_x0 = jnp.stack([self.t_bc, self.x_min * jnp.ones_like(self.t_bc)], axis=1)
-            self.u_x1 = self.u2(self.t_bc)
             self.tx_x1 = jnp.stack([self.t_bc, self.x_max * jnp.ones_like(self.t_bc)], axis=1)
+            if self.bc_type != 'periodic':
+                self.u_x0 = self.u1(self.t_bc)
+                self.u_x1 = self.u2(self.t_bc)
+                
         elif self.input_dim == 3:
             # Initial condition at t = t_min
             x_grid, y_grid = jnp.meshgrid(self.x_bc, self.y_bc)
             self.tx_t0 = jnp.stack([self.t_min * jnp.ones_like(x_grid.ravel()), x_grid.ravel(), y_grid.ravel()], axis=1)
             self.u_t0 = self.u0(self.tx_t0[:,1], self.tx_t0[:,2])
-            # Boundary at x = x_min
             t_grid, y_grid = jnp.meshgrid(self.t_bc, self.y_bc)
+            # Boundary at x = x_min
             self.tx_x0 = jnp.stack([t_grid.ravel(), self.x_min * jnp.ones_like(t_grid.ravel()), y_grid.ravel()], axis=1)
-            self.u_x0 = self.u1(self.tx_x0[:,0], self.tx_x0[:,2])
             # Boundary at x = x_max
             self.tx_x1 = jnp.stack([t_grid.ravel(), self.x_max * jnp.ones_like(t_grid.ravel()), y_grid.ravel()], axis=1)
-            self.u_x1 = self.u2(self.tx_x1[:,0], self.tx_x1[:,2])
             # Boundary at y = y_min
             t_grid, x_grid = jnp.meshgrid(self.t_bc, self.x_bc)
             self.tx_y0 = jnp.stack([t_grid.ravel(), x_grid.ravel(), self.y_min * jnp.ones_like(t_grid.ravel())], axis=1)
-            self.u_y0 = self.u3(self.tx_y0[:,0], self.tx_y0[:,1])
             # Boundary at y = y_max
             self.tx_y1 = jnp.stack([t_grid.ravel(), x_grid.ravel(), self.y_max * jnp.ones_like(t_grid.ravel())], axis=1)
-            self.u_y1 = self.u4(self.tx_y1[:,0], self.tx_y1[:,1])
-        
+            
+            if self.bc_type != 'periodic':
+                self.u_x0 = self.u1(self.tx_x0[:,0], self.tx_x0[:,2])
+                self.u_x1 = self.u2(self.tx_x1[:,0], self.tx_x1[:,2])
+                self.u_y0 = self.u3(self.tx_y0[:,0], self.tx_y0[:,1])
+                self.u_y1 = self.u4(self.tx_y1[:,0], self.tx_y1[:,1])
+
+
     def gen_funcs(self, grade_idx=None):
         if grade_idx is None:
             net_u = lambda params_last_k, X: self.model.forward_with_params_last_k(params_last_k, X, self.k).squeeze()
