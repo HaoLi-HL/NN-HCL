@@ -818,8 +818,8 @@ class MinMaxOptProb2D:
 
         for grade_idx in range(self.total_grade):
             print(f"\nTraining Grade {grade_idx}")
-            lr = optax.schedules.warmup_cosine_decay_schedule(init_value=1e-6, peak_value=self.init_lrs[grade_idx], warmup_steps=int(grade_epochs[grade_idx]/100), 
-                                                              decay_steps=grade_epochs[grade_idx], end_value=1e-5)
+            lr = optax.schedules.warmup_cosine_decay_schedule(init_value=1e-5, peak_value=self.init_lrs[grade_idx], warmup_steps=int(grade_epochs[grade_idx]/100), 
+                                                              decay_steps=grade_epochs[grade_idx], end_value=1e-4)
             optimizer = optax.adam(lr)
             params = self.model.mlps[grade_idx].params
             opt_state = optimizer.init(params)
