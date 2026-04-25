@@ -1,5 +1,5 @@
 import jax.numpy as jnp
-from jax import vmap
+from jax import lax, vmap
 import numpy as np
 
 class PiecewiseLinearPolynomialsHex:
@@ -17,7 +17,8 @@ class PiecewiseLinearPolynomialsHex:
             x_max: Maximum value for x (default: 1.0).
             y_min: Minimum value for y (default: -1.0).
             y_max: Maximum value for y (default: 1.0).
-            rf_times: Refinement level for composite quadrature. 
+            rf_times: Refinement level for composite quadrature.
+                Adaptive level 0 uses this value; adaptive level 1 uses rf_times + 1.
             bdry_rf_times: Refinement level for boundary quadrature.
         """
         self.N_t = N_t
@@ -39,6 +40,33 @@ class PiecewiseLinearPolynomialsHex:
             self.p_dof = 4
         self.coeffs = jnp.zeros((self.N_elements, self.p_dof))
         self.quad_points, self.quad_weights, self.quad_element_indices, self.quad_points_parti, self.quad_weights_parti = self._setup_quadrature()
+        self.Nq_level0 = self.Nq
+        self.quad_points_level0 = self.quad_points
+        self.quad_weights_level0 = self.quad_weights
+        self.quad_element_indices_level0 = self.quad_element_indices
+        self.quad_points_parti_level0 = self.quad_points_parti
+        self.quad_weights_parti_level0 = self.quad_weights_parti
+        (
+            self.Nq_level1,
+            self.quad_points_level1,
+            self.quad_weights_level1,
+            self.quad_element_indices_level1,
+            self.quad_points_parti_level1,
+            self.quad_weights_parti_level1,
+        ) = self._setup_quadrature_for_refinement(self.rf_times + 1)
+        self.quad_levels = jnp.zeros(self.N_elements, dtype=jnp.int32)
+        self.eta_osc = jnp.zeros(self.N_elements)
+        self.element_loss_weights = jnp.ones(self.N_elements)
+        self.level0_element_indices = jnp.arange(self.N_elements)
+        self.level1_element_indices = jnp.array([], dtype=jnp.int32)
+        self.adaptive_quad_points_parti = None
+        self.adaptive_quad_weights_parti = None
+        self.adaptive_quad_loss_weights_parti = None
+        self.adaptive_quad_points = self.quad_points
+        self.adaptive_quad_weights = self.quad_weights
+        self.adaptive_quad_loss_weights = jnp.ones_like(self.quad_weights)
+        self.adaptive_loss_quad_weights = self.quad_weights
+        self.adaptive_quad_element_indices = self.quad_element_indices
         self.bdry_points_parti, self.bdry_weights_parti = self.get_boundary_quadrature()
         self.normals = self.compute_normals()
 
@@ -59,22 +87,26 @@ class PiecewiseLinearPolynomialsHex:
         partitions = lowers + offsets[None, :, :]  # (N_elements, 8, 3)
         return partitions
         
-    def _setup_quadrature(self):
+    def _setup_quadrature_for_refinement(self, rf_times):
         """
-        Setup composite quadrature points and weights for hexahedral mesh.
+        Setup tensor-product composite trapezoidal quadrature for one refinement level.
+
+        The refinement level k splits each element into 2**k intervals in every
+        coordinate direction. Level k + 1 doubles the interval count in t, x,
+        and y, so it provides a strictly finer quadrature bank for selected
+        high-oscillation elements.
 
         Returns:
+            Nq: Number of quadrature points per hexahedron.
             quad_points: Quadrature points, shape (N_quad, 3).
             quad_weights: Quadrature weights, shape (N_quad,).
             quad_element_indices: Indices of hexahedra, shape (N_quad,).
-            quad_points_parti: Quadrature points per hexahedron, shape (N_elements, self.Nq, 3).
-            quad_weights_parti: Quadrature weights per hexahedron, shape (N_elements, self.Nq).
+            quad_points_parti: Quadrature points per hexahedron, shape (N_elements, Nq, 3).
+            quad_weights_parti: Quadrature weights per hexahedron, shape (N_elements, Nq).
         """
-        # Composite quadrature with refinement level k = self.rf_times
-        k = self.rf_times
-        num_intervals = 2 ** k
+        num_intervals = 2 ** rf_times
         num_points = num_intervals + 1
-        self.Nq = num_points ** 3
+        Nq = num_points ** 3
 
         def composite_quad(hex):
             t_low, x_low, y_low = hex[0]
@@ -106,9 +138,171 @@ class PiecewiseLinearPolynomialsHex:
         # Flatten for global quadrature
         quad_points = quad_points_parti.reshape(-1, 3)
         quad_weights = quad_weights_parti.reshape(-1)
-        quad_element_indices = jnp.repeat(jnp.arange(self.N_elements), self.Nq)
+        quad_element_indices = jnp.repeat(jnp.arange(self.N_elements), Nq)
+
+        return Nq, quad_points, quad_weights, quad_element_indices, quad_points_parti, quad_weights_parti
+
+    def _setup_quadrature(self):
+        """
+        Setup level-0 composite quadrature points and weights for hexahedral mesh.
+
+        Returns:
+            quad_points: Quadrature points, shape (N_quad, 3).
+            quad_weights: Quadrature weights, shape (N_quad,).
+            quad_element_indices: Indices of hexahedra, shape (N_quad,).
+            quad_points_parti: Quadrature points per hexahedron, shape (N_elements, self.Nq, 3).
+            quad_weights_parti: Quadrature weights per hexahedron, shape (N_elements, self.Nq).
+        """
+        Nq, quad_points, quad_weights, quad_element_indices, quad_points_parti, quad_weights_parti = self._setup_quadrature_for_refinement(self.rf_times)
+        self.Nq = Nq
 
         return quad_points, quad_weights, quad_element_indices, quad_points_parti, quad_weights_parti
+
+    def _pad_level0_quadrature_subset(self, element_indices):
+        """
+        Pad a level-0 quadrature subset to level-1 shape with zero weights.
+
+        This keeps sampled adaptive quadrature fixed-shape without materializing
+        a full padded array for every element.
+        """
+        points0 = self.quad_points_parti_level0[element_indices]
+        weights0 = self.quad_weights_parti_level0[element_indices]
+        pad_size = self.Nq_level1 - self.Nq_level0
+        if pad_size <= 0:
+            return points0, weights0
+        pad_points = jnp.repeat(points0[:, :1, :], pad_size, axis=1)
+        pad_weights = jnp.zeros((points0.shape[0], pad_size), dtype=weights0.dtype)
+        quad_points_parti = jnp.concatenate([points0, pad_points], axis=1)
+        quad_weights_parti = jnp.concatenate([weights0, pad_weights], axis=1)
+        return quad_points_parti, quad_weights_parti
+
+    def compute_oscillation_indicator(self, u_values_parti):
+        """
+        Compute eta_osc for each element from per-element solution values.
+
+        Args:
+            u_values_parti: Values grouped by element, shape (N_elements, Nq_like).
+
+        Returns:
+            eta_osc: max(u) - min(u) on each element, shape (N_elements,).
+        """
+        return jnp.max(u_values_parti, axis=1) - jnp.min(u_values_parti, axis=1)
+
+    def update_adaptive_quadrature_by_oscillation(self, u_values_parti=None, u_eval=None, params=None, top_fraction=None, top_count=None, store_padded_quadrature=False):
+        """
+        Select level-1 quadrature elements using the oscillation indicator.
+
+        By default, the selected fraction is 2 / N_x, so the number of refined
+        elements is ceil((2 / N_x) * N_elements). The selected elements use the
+        precomputed level-1 quadrature bank and get loss multiplier 2; all
+        other elements use level 0 and get loss multiplier 1.
+
+        Args:
+            u_values_parti: Optional values grouped by element. If omitted,
+                u_eval and params are used to evaluate the solution at level-1
+                quadrature points before computing eta_osc.
+            u_eval: Callable with signature u_eval(params, points).
+            params: Parameters passed to u_eval.
+            top_fraction: Optional fraction of elements to refine. Defaults to 2 / N_x.
+            top_count: Optional exact number of elements to refine. Overrides top_fraction.
+            store_padded_quadrature: If True, materialize fixed-shape adaptive
+                per-element quadrature arrays. This is useful for inspection but
+                is avoided by default for memory efficiency.
+
+        Returns:
+            eta_osc: Oscillation indicator for every element.
+            level1_element_indices: Indices selected for level-1 quadrature.
+
+        Side effects:
+            element_loss_weights stores per-element loss multipliers.
+            adaptive_quad_loss_weights stores the same multipliers expanded to
+                adaptive quadrature points.
+            adaptive_loss_quad_weights stores adaptive_quad_weights already
+                multiplied by adaptive_quad_loss_weights.
+        """
+        if u_values_parti is None:
+            if u_eval is None or params is None:
+                raise ValueError("Provide u_values_parti, or provide both u_eval and params.")
+            level1_points = self.quad_points_parti_level1.reshape(-1, 3)
+            u_values_parti = u_eval(params, level1_points).reshape(self.N_elements, self.Nq_level1)
+
+        eta_osc = self.compute_oscillation_indicator(u_values_parti)
+
+        if top_count is None:
+            if top_fraction is None:
+                top_fraction = 2.0 / self.N_x
+            top_count = int(np.ceil(float(top_fraction) * self.N_elements))
+        top_count = max(0, min(self.N_elements, int(top_count)))
+
+        if top_count == 0:
+            level1_element_indices = jnp.array([], dtype=jnp.int32)
+        else:
+            _, level1_element_indices = lax.top_k(eta_osc, top_count)
+
+        quad_levels = jnp.zeros(self.N_elements, dtype=jnp.int32)
+        quad_levels = quad_levels.at[level1_element_indices].set(1)
+        element_loss_weights = jnp.ones(self.N_elements)
+        element_loss_weights = element_loss_weights.at[level1_element_indices].set(2.0)
+        level0_element_indices = jnp.where(quad_levels == 0)[0]
+
+        points0 = self.quad_points_parti_level0[level0_element_indices].reshape(-1, 3)
+        weights0 = self.quad_weights_parti_level0[level0_element_indices].reshape(-1)
+        elem_indices0 = jnp.repeat(level0_element_indices, self.Nq_level0)
+        loss_weights0 = jnp.ones_like(weights0)
+        points1 = self.quad_points_parti_level1[level1_element_indices].reshape(-1, 3)
+        weights1 = self.quad_weights_parti_level1[level1_element_indices].reshape(-1)
+        elem_indices1 = jnp.repeat(level1_element_indices, self.Nq_level1)
+        loss_weights1 = 2.0 * jnp.ones_like(weights1)
+
+        self.quad_levels = quad_levels
+        self.eta_osc = eta_osc
+        self.element_loss_weights = element_loss_weights
+        self.level0_element_indices = level0_element_indices
+        self.level1_element_indices = level1_element_indices
+        if store_padded_quadrature:
+            all_indices = jnp.arange(self.N_elements)
+            self.adaptive_quad_points_parti, self.adaptive_quad_weights_parti = self.get_adaptive_quadrature_for_elements(all_indices)
+            self.adaptive_quad_loss_weights_parti = element_loss_weights[:, None] * jnp.ones_like(self.adaptive_quad_weights_parti)
+        self.adaptive_quad_points = jnp.concatenate([points0, points1], axis=0)
+        self.adaptive_quad_weights = jnp.concatenate([weights0, weights1], axis=0)
+        self.adaptive_quad_loss_weights = jnp.concatenate([loss_weights0, loss_weights1], axis=0)
+        self.adaptive_loss_quad_weights = self.adaptive_quad_weights * self.adaptive_quad_loss_weights
+        self.adaptive_quad_element_indices = jnp.concatenate([elem_indices0, elem_indices1], axis=0)
+
+        return eta_osc, level1_element_indices
+
+    def get_quadrature_by_level(self, level):
+        """
+        Return per-element quadrature arrays for a fixed adaptive level.
+
+        Args:
+            level: 0 for rf_times, 1 for rf_times + 1.
+
+        Returns:
+            Nq, quad_points_parti, quad_weights_parti.
+        """
+        if level == 0:
+            return self.Nq_level0, self.quad_points_parti_level0, self.quad_weights_parti_level0
+        if level == 1:
+            return self.Nq_level1, self.quad_points_parti_level1, self.quad_weights_parti_level1
+        raise ValueError("level must be 0 or 1.")
+
+    def get_adaptive_quadrature_for_elements(self, element_indices):
+        """
+        Return fixed-shape adaptive quadrature for selected elements only.
+
+        Refined elements use level-1 quadrature. Other elements use level-0
+        quadrature padded with zero weights to the level-1 shape.
+        """
+        levels = self.quad_levels[element_indices]
+        points0, weights0 = self._pad_level0_quadrature_subset(element_indices)
+        points1 = self.quad_points_parti_level1[element_indices]
+        weights1 = self.quad_weights_parti_level1[element_indices]
+        level_mask_points = levels[:, None, None].astype(bool)
+        level_mask_weights = levels[:, None].astype(bool)
+        quad_points = jnp.where(level_mask_points, points1, points0)
+        quad_weights = jnp.where(level_mask_weights, weights1, weights0)
+        return quad_points, quad_weights
 
     def get_boundary_quadrature(self):
         """
