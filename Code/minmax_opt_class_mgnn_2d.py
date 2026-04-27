@@ -281,6 +281,7 @@ class MinMaxOptProb2D:
             self.maximize_kh = jit(self.maximize_kh_step)
 
     def update_adaptive_quadrature(self, params):
+        print(f"Adaptive quadratures are updated.")
         if not self.using_adaptive_quadrature():
             return None, None
         eta_osc, level1_indices = self.pwp.update_adaptive_quadrature_by_oscillation(
