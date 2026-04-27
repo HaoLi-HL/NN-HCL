@@ -25,7 +25,7 @@ class SeqMinMaxOptProb:
                  flux=None, res=None, bc_type='Dirichlet', loss_type='interior',  k=0, use_a=True, f_plot=1000, plt_err_dist=False, plt_mesh=False,
                  partition='tri', dg_type='P1', use_importance_sampling=False, u_ref=None, pre_epochs=1000, pre_train='',
                  M_t=1000, M_x=2000, set_wandb=False, use_adaptive_quadrature=True,
-                 adaptive_quad_top_fraction=None, f_quad_adapt=1, adaptive_quad_max_points=65536):
+                 adaptive_quad_top_fraction=None, f_quad_adapt=1000, adaptive_quad_max_points=65536):
         """
         Initialize the sequential training class.
 
