@@ -256,6 +256,15 @@ class MinMaxOptProb2D:
         weights = jnp.maximum(jnp.abs(loss_all_elems), 1e-7)  # Avoid zero
         self.importance_probs = weights / jnp.sum(weights)
 
+    def element_loss_weights(self, element_indices=None):
+        if hasattr(self.pwp, "element_loss_weights"):
+            weights = self.pwp.element_loss_weights
+        else:
+            weights = jnp.ones(self.pwp.N_elements)
+        if element_indices is None:
+            return weights
+        return weights[element_indices]
+
     def using_adaptive_quadrature(self):
         return self.use_adaptive_quadrature and hasattr(self.pwp, "update_adaptive_quadrature_by_oscillation")
 
@@ -374,6 +383,7 @@ class MinMaxOptProb2D:
             loss_all_test, loss_l1_all = self.vmap_loss_fn_elem_int_per_elem(jnp.arange(Nt), perturbed_coeffs_all, params)
         best_indices = jnp.argmax(loss_all_test, axis=1)
         loss_each_elem = loss_all_test[jnp.arange(Nt), best_indices]
+        loss_each_elem = self.element_loss_weights() * loss_each_elem
         loss_eqn = jnp.sum(loss_each_elem)
         # Compute absolute loss, which is the L1 norm of the residual. Just for comparison and debugging. We do not use it in the optimization.
         loss_l1 = jnp.sum(loss_l1_all)
@@ -688,6 +698,7 @@ class MinMaxOptProb2D:
             else:
                 loss_per_elem, _ = self.vmap_loss_fn_elem_int_per_elem(element_indices_sampled, p_coeffs_all, params)
             loss_per_elem = jnp.squeeze(loss_per_elem, axis=-1)
+            loss_per_elem = self.element_loss_weights(element_indices_sampled) * loss_per_elem
             weighted_loss_per_elem = loss_per_elem / importance_probs[element_indices_sampled]
             interior_loss = jnp.sum(weighted_loss_per_elem) / batch_size
             return interior_loss, current_key
@@ -698,7 +709,7 @@ class MinMaxOptProb2D:
                 loss_per_elem, _ = self.loss_fn_elem_int_candidates(params, p_coeffs_all)
             else:
                 loss_per_elem, _ = self.vmap_loss_fn_elem_int_per_elem(element_indices, p_coeffs_all, params)
-            interior_loss = jnp.sum(loss_per_elem)
+            interior_loss = jnp.sum(self.element_loss_weights()[:, None] * loss_per_elem)
             return interior_loss
         
     def loss_fn_elem_bdry(self, params):

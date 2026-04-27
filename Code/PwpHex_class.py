@@ -192,9 +192,10 @@ class PiecewiseLinearPolynomialsHex:
 
         The indicator is evaluated on level-1 quadrature points in chunks. This
         avoids materializing all level-1 points for the whole mesh at once.
-        Selected elements get quadrature level 1; all others remain level 0.
-        The quadrature weights for both levels integrate over the same physical
-        element volume, so no extra loss multiplier is applied.
+        Selected elements get quadrature level 1 and double element loss
+        weight; all others remain level 0 with unit element loss weight. The
+        quadrature weights for both levels still integrate over the same
+        physical element volume.
         """
         if top_count is None:
             if top_fraction is None:
