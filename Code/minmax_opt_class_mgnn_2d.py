@@ -281,7 +281,6 @@ class MinMaxOptProb2D:
             self.maximize_kh = jit(self.maximize_kh_step)
 
     def update_adaptive_quadrature(self, params):
-        print(f"Adaptive quadratures are updated.")
         if not self.using_adaptive_quadrature():
             return None, None
         eta_osc, level1_indices = self.pwp.update_adaptive_quadrature_by_oscillation(
@@ -924,6 +923,7 @@ class MinMaxOptProb2D:
                 if self.should_update_adaptive_quadrature(iter, grade_epochs[grade_idx]):
                     self.update_adaptive_quadrature(params)
                     quad_updated = True
+                    print(f"Adaptive quadratures are updated.")
                 if (iter % self.f_opt_kh == 0 or quad_updated) and self.loss_type not in ['pinn', 'cai']:
                     self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params, self.key)
                     if self.use_importance_sampling:
