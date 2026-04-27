@@ -272,13 +272,7 @@ class MinMaxOptProb2D:
         return self.using_adaptive_quadrature() and self.adaptive_quadrature_active
 
     def set_maximize_kh_fn(self):
-        if self.using_adaptive_quadrature():
-            # The adaptive branch reads mutable quadrature-level indices. Keep
-            # the outer function un-jitted and rely on jitted vmapped element
-            # kernels below.
-            self.maximize_kh = self.maximize_kh_step
-        else:
-            self.maximize_kh = jit(self.maximize_kh_step)
+        self.maximize_kh = jit(self.maximize_kh_step)
 
     def update_adaptive_quadrature(self, params):
         if not self.using_adaptive_quadrature():
@@ -289,7 +283,9 @@ class MinMaxOptProb2D:
             top_fraction=self.adaptive_quad_top_fraction,
             max_points=self.adaptive_quad_max_points,
         )
+        self.set_vmap_loss_fn_elem_int_per_elem_adaptive()
         self.adaptive_quadrature_active = True
+        self.set_maximize_kh_fn()
         return eta_osc, level1_indices
 
     def should_update_adaptive_quadrature(self, iter, grade_epoch):
@@ -353,6 +349,10 @@ class MinMaxOptProb2D:
             self.space_time_flux = jit(vmap(lambda u: jnp.array([u, self.flux(u)[0], self.flux(u)[1]])))
         self.vmap_loss_fn_elem_int_per_elem = jit(vmap(self.loss_fn_elem_int_per_elem, in_axes=(0, 0, None)))
         self.vmap_loss_fn_elem_int_per_elem_quad = jit(vmap(self.loss_fn_elem_int_per_elem_quad, in_axes=(0, 0, None, 0, 0)))
+        if self.using_adaptive_quadrature():
+            self.set_vmap_loss_fn_elem_int_per_elem_adaptive()
+        else:
+            self.vmap_loss_fn_elem_int_per_elem_adaptive = None
 
     def maximize_kh_step(self, params, current_key):
         Nt = self.pwp.N_elements
@@ -459,39 +459,71 @@ class MinMaxOptProb2D:
         loss_l1 = jnp.dot(jnp.abs(residual), quad_weights)
         return loss, loss_l1
 
-    def vmap_loss_fn_elem_int_per_elem_adaptive(self, params, p_coeffs_all):
-        """
-        Evaluate element losses by quadrature level.
+    def _jit_vmap_loss_fn_elem_int_per_elem_group(self, element_indices, quad_points_parti, quad_weights_parti):
+        if element_indices.size == 0:
+            return None, jnp.array([], dtype=jnp.int32)
 
-        Each level is evaluated as one element batch, so all elements inside a
-        vmap call have the same number of quadrature points.
+        local_indices = jnp.arange(element_indices.shape[0], dtype=jnp.int32)
+
+        def loss_fn_elem_int_per_elem_group(local_idx, p_coeffs_elem, params):
+            parti_idx = element_indices[local_idx]
+            return self.loss_fn_elem_int_per_elem_quad(
+                parti_idx,
+                p_coeffs_elem,
+                params,
+                quad_points_parti[local_idx],
+                quad_weights_parti[local_idx],
+            )
+
+        return jit(vmap(loss_fn_elem_int_per_elem_group, in_axes=(0, 0, None))), local_indices
+
+    def set_vmap_loss_fn_elem_int_per_elem_adaptive(self):
+        """
+        Rebuild the jitted adaptive element-loss evaluator.
+
+        This must be called whenever the refined element set changes because
+        the compiled function closes over the current level groups and cached
+        quadrature arrays.
         """
         Nt = self.pwp.N_elements
-        loss_all = jnp.zeros(p_coeffs_all.shape[:2])
-        loss_l1_all = jnp.zeros(Nt)
+        level0_indices, level0_quad_points, level0_quad_weights = self.pwp.get_quadrature_group_by_level(0)
+        level1_indices, level1_quad_points, level1_quad_weights = self.pwp.get_quadrature_group_by_level(1)
+        vmap_level0, local_indices0 = self._jit_vmap_loss_fn_elem_int_per_elem_group(
+            level0_indices,
+            level0_quad_points,
+            level0_quad_weights,
+        )
+        vmap_level1, local_indices1 = self._jit_vmap_loss_fn_elem_int_per_elem_group(
+            level1_indices,
+            level1_quad_points,
+            level1_quad_weights,
+        )
 
-        element_indices = self.pwp.level0_element_indices
-        if element_indices.size > 0:
-            loss_level, loss_l1_level = self.vmap_loss_fn_elem_int_per_elem(
-                element_indices,
-                p_coeffs_all[element_indices],
-                params,
-            )
-            loss_all = loss_all.at[element_indices].set(loss_level)
-            loss_l1_all = loss_l1_all.at[element_indices].set(loss_l1_level)
+        def loss_fn_elem_int_per_elem_adaptive(params, p_coeffs_all):
+            loss_all = jnp.zeros(p_coeffs_all.shape[:2])
+            loss_l1_all = jnp.zeros(Nt)
 
-        element_indices, quad_points_parti, quad_weights_parti = self.pwp.get_quadrature_group_by_level(1)
-        if element_indices.size > 0:
-            loss_level, loss_l1_level = self.vmap_loss_fn_elem_int_per_elem_quad(
-                element_indices,
-                p_coeffs_all[element_indices],
-                params,
-                quad_points_parti,
-                quad_weights_parti,
-            )
-            loss_all = loss_all.at[element_indices].set(loss_level)
-            loss_l1_all = loss_l1_all.at[element_indices].set(loss_l1_level)
-        return loss_all, loss_l1_all
+            if vmap_level0 is not None:
+                loss_level, loss_l1_level = vmap_level0(
+                    local_indices0,
+                    p_coeffs_all[level0_indices],
+                    params,
+                )
+                loss_all = loss_all.at[level0_indices].set(loss_level)
+                loss_l1_all = loss_l1_all.at[level0_indices].set(loss_l1_level)
+
+            if vmap_level1 is not None:
+                loss_level, loss_l1_level = vmap_level1(
+                    local_indices1,
+                    p_coeffs_all[level1_indices],
+                    params,
+                )
+                loss_all = loss_all.at[level1_indices].set(loss_level)
+                loss_l1_all = loss_l1_all.at[level1_indices].set(loss_l1_level)
+
+            return loss_all, loss_l1_all
+
+        self.vmap_loss_fn_elem_int_per_elem_adaptive = jit(loss_fn_elem_int_per_elem_adaptive)
     
     def loss_fn_ic(self, params):
         return jnp.mean((self.u_eval(params, self.tx_t0) - self.u_t0)**2)
