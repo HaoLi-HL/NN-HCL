@@ -192,8 +192,9 @@ class PiecewiseLinearPolynomialsHex:
 
         The indicator is evaluated on level-1 quadrature points in chunks. This
         avoids materializing all level-1 points for the whole mesh at once.
-        Selected elements get quadrature level 1 and loss multiplier 2; all
-        others remain level 0 with multiplier 1.
+        Selected elements get quadrature level 1; all others remain level 0.
+        The quadrature weights for both levels integrate over the same physical
+        element volume, so no extra loss multiplier is applied.
         """
         if top_count is None:
             if top_fraction is None:
@@ -221,7 +222,7 @@ class PiecewiseLinearPolynomialsHex:
         quad_levels = quad_levels.at[level1_element_indices].set(1)
         level0_element_indices = jnp.where(quad_levels == 0)[0]
         element_loss_weights = jnp.ones(self.N_elements)
-        element_loss_weights = element_loss_weights.at[level1_element_indices].set(2.0)
+        element_loss_weights = element_loss_weights.at[level1_element_indices].set(2)
 
         self.quad_levels = quad_levels
         self.eta_osc = eta_osc
@@ -229,6 +230,32 @@ class PiecewiseLinearPolynomialsHex:
         self.level0_element_indices = level0_element_indices
         self.level1_element_indices = level1_element_indices
         return eta_osc, level1_element_indices
+
+    def _pad_level0_quadrature_subset(self, element_indices):
+        points0 = self.quad_points_parti[element_indices]
+        weights0 = self.quad_weights_parti[element_indices]
+        pad_size = self.Nq_by_level[1] - self.Nq_by_level[0]
+        if pad_size <= 0:
+            return points0, weights0
+        pad_points = jnp.repeat(points0[:, :1, :], pad_size, axis=1)
+        pad_weights = jnp.zeros((points0.shape[0], pad_size), dtype=weights0.dtype)
+        return jnp.concatenate([points0, pad_points], axis=1), jnp.concatenate([weights0, pad_weights], axis=1)
+
+    def get_adaptive_quadrature_for_elements(self, element_indices):
+        """
+        Return fixed-shape adaptive quadrature for selected elements only.
+
+        This is intended for sampled batches whose level mix is not known
+        statically. Non-refined elements use level-0 quadrature padded by
+        zero-weight points; refined elements use level-1 quadrature.
+        """
+        element_indices = jnp.asarray(element_indices, dtype=jnp.int32)
+        levels = self.quad_levels[element_indices]
+        points0, weights0 = self._pad_level0_quadrature_subset(element_indices)
+        _, points1, weights1 = self.get_quadrature_by_level(1, element_indices)
+        level_mask_points = levels[:, None, None].astype(bool)
+        level_mask_weights = levels[:, None].astype(bool)
+        return jnp.where(level_mask_points, points1, points0), jnp.where(level_mask_weights, weights1, weights0)
 
     def get_boundary_quadrature(self):
         """

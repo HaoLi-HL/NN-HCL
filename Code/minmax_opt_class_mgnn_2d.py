@@ -36,7 +36,8 @@ class MinMaxOptProb2D:
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  flux=None, res=None, bc_type='Dirichlet', loss_type='interior', k=0, use_a=True, M_t = 1000, M_x = 1000, f_plot=1000, plt_err_dist=False, plt_mesh=False,
                  partition='tri', p_dof=None, dg_type='P1', use_importance_sampling=False, u_ref=None, pre_epochs=1000, pre_train='',
-                 seq_train=False, set_wandb=False):
+                 seq_train=False, set_wandb=False, use_adaptive_quadrature=True,
+                 adaptive_quad_top_fraction=None, f_quad_adapt=1, adaptive_quad_max_points=65536):
         self.input_dim = input_dim
         
         self.seq_train = seq_train  # Sequential training flag
@@ -207,6 +208,16 @@ class MinMaxOptProb2D:
         self.u_ref = u_ref  # Reference solution for error calculation, if provided
         self.pre_epochs = pre_epochs
         self.pre_train = pre_train  # 'ic' or 'u_ref' or ''
+        self.use_adaptive_quadrature = (
+            use_adaptive_quadrature
+            and self.input_dim == 3
+            and self.partition == 'hex'
+            and self.loss_type == 'interior'
+        )
+        self.adaptive_quad_top_fraction = adaptive_quad_top_fraction
+        self.f_quad_adapt = max(1, int(f_quad_adapt))
+        self.adaptive_quad_max_points = adaptive_quad_max_points
+        self.adaptive_quadrature_active = False
 
         if not self.seq_train and self.set_wandb:
             wandb.init(project=self.project, name=self.run_name, notes=self.notes,
@@ -227,10 +238,13 @@ class MinMaxOptProb2D:
                            "alpha": alpha,
                            "N_perturb": N_perturb,
                            "sigma": sigma,
-                           "L1reg": L1reg
+                           "L1reg": L1reg,
+                           "use_adaptive_quadrature": self.use_adaptive_quadrature,
+                           "adaptive_quad_top_fraction": adaptive_quad_top_fraction,
+                           "f_quad_adapt": self.f_quad_adapt,
+                           "adaptive_quad_max_points": adaptive_quad_max_points
                        })
         self.gen_funcs(grade_idx=0)  # Generate functions for the first grade
-        self.vmap_loss_fn_elem_int_per_elem = vmap(self.loss_fn_elem_int_per_elem, in_axes=(0, 0, None))
         print(f"Partition type: {self.partition}, dg_type: {self.dg_type}, p_dof: {self.p_dof}")
 
         if self.plt_err_dist and self.loss_type in ['pinn', 'cai']:
@@ -241,6 +255,39 @@ class MinMaxOptProb2D:
         print(f"Updating importance sampling probabilities...")
         weights = jnp.maximum(jnp.abs(loss_all_elems), 1e-7)  # Avoid zero
         self.importance_probs = weights / jnp.sum(weights)
+
+    def using_adaptive_quadrature(self):
+        return self.use_adaptive_quadrature and hasattr(self.pwp, "update_adaptive_quadrature_by_oscillation")
+
+    def adaptive_quadrature_is_active(self):
+        return self.using_adaptive_quadrature() and self.adaptive_quadrature_active
+
+    def set_maximize_kh_fn(self):
+        if self.using_adaptive_quadrature():
+            # The adaptive branch reads mutable quadrature-level indices. Keep
+            # the outer function un-jitted and rely on jitted vmapped element
+            # kernels below.
+            self.maximize_kh = self.maximize_kh_step
+        else:
+            self.maximize_kh = jit(self.maximize_kh_step)
+
+    def update_adaptive_quadrature(self, params):
+        if not self.using_adaptive_quadrature():
+            return None, None
+        eta_osc, level1_indices = self.pwp.update_adaptive_quadrature_by_oscillation(
+            u_eval=self.u_eval,
+            params=params,
+            top_fraction=self.adaptive_quad_top_fraction,
+            max_points=self.adaptive_quad_max_points,
+        )
+        self.adaptive_quadrature_active = True
+        return eta_osc, level1_indices
+
+    def should_update_adaptive_quadrature(self, iter, grade_epoch):
+        if not self.using_adaptive_quadrature():
+            return False
+        adapt_start = int(np.ceil(0.25 * grade_epoch))
+        return iter >= adapt_start and (iter - adapt_start) % self.f_quad_adapt == 0
 
     def gen_ibc(self):
         if self.input_dim == 2:
@@ -294,6 +341,8 @@ class MinMaxOptProb2D:
             self.space_time_flux = jit(vmap(lambda u: jnp.array([u, self.flux(u)])))
         elif self.input_dim == 3:
             self.space_time_flux = jit(vmap(lambda u: jnp.array([u, self.flux(u)[0], self.flux(u)[1]])))
+        self.vmap_loss_fn_elem_int_per_elem = jit(vmap(self.loss_fn_elem_int_per_elem, in_axes=(0, 0, None)))
+        self.vmap_loss_fn_elem_int_per_elem_quad = jit(vmap(self.loss_fn_elem_int_per_elem_quad, in_axes=(0, 0, None, 0, 0)))
 
     def maximize_kh_step(self, params, current_key):
         Nt = self.pwp.N_elements
@@ -319,10 +368,13 @@ class MinMaxOptProb2D:
             perturbations_all = self.sigma * jax.random.uniform(key, (self.N_perturb, self.p_dof), minval=-1, maxval=1)
         
         perturbed_coeffs_all = init_coeffs_all[:, None, :] + perturbations_all[None, :, :]
-        loss_all_test, loss_l1_all = self.vmap_loss_fn_elem_int_per_elem(jnp.arange(Nt), perturbed_coeffs_all, params)
+        if self.adaptive_quadrature_is_active():
+            loss_all_test, loss_l1_all = self.loss_fn_elem_int_candidates(params, perturbed_coeffs_all)
+        else:
+            loss_all_test, loss_l1_all = self.vmap_loss_fn_elem_int_per_elem(jnp.arange(Nt), perturbed_coeffs_all, params)
         best_indices = jnp.argmax(loss_all_test, axis=1)
         loss_each_elem = loss_all_test[jnp.arange(Nt), best_indices]
-        loss_eqn = jnp.sum(loss_all_test[jnp.arange(Nt), best_indices])
+        loss_eqn = jnp.sum(loss_each_elem)
         # Compute absolute loss, which is the L1 norm of the residual. Just for comparison and debugging. We do not use it in the optimization.
         loss_l1 = jnp.sum(loss_l1_all)
         best_coeffs_all = perturbed_coeffs_all[jnp.arange(Nt), best_indices]
@@ -331,6 +383,9 @@ class MinMaxOptProb2D:
     def loss_fn_elem_int_per_elem(self, parti_idx, p_coeffs_all, params):
         quad_points = self.pwp.quad_points_parti[parti_idx]
         quad_weights = self.pwp.quad_weights_parti[parti_idx]
+        return self.loss_fn_elem_int_per_elem_quad(parti_idx, p_coeffs_all, params, quad_points, quad_weights)
+
+    def loss_fn_elem_int_per_elem_quad(self, parti_idx, p_coeffs_all, params, quad_points, quad_weights):
         u_quad = self.u_eval(params, quad_points)
         grad_u_tx = self.grad_u(params, quad_points)
         if self.input_dim == 2:
@@ -392,6 +447,25 @@ class MinMaxOptProb2D:
         # Compute absolute loss, which is the L1 norm of the residual. Just for comparison and debugging. We do not use it in the optimization.
         loss_l1 = jnp.dot(jnp.abs(residual), quad_weights)
         return loss, loss_l1
+
+    def loss_fn_elem_int_candidates(self, params, p_coeffs_all):
+        Nt = self.pwp.N_elements
+        loss_all = jnp.zeros(p_coeffs_all.shape[:2])
+        loss_l1_all = jnp.zeros(Nt)
+        for level, element_indices in ((0, self.pwp.level0_element_indices), (1, self.pwp.level1_element_indices)):
+            if element_indices.size == 0:
+                continue
+            _, quad_points_parti, quad_weights_parti = self.pwp.get_quadrature_by_level(level, element_indices)
+            loss_level, loss_l1_level = self.vmap_loss_fn_elem_int_per_elem_quad(
+                element_indices,
+                p_coeffs_all[element_indices],
+                params,
+                quad_points_parti,
+                quad_weights_parti,
+            )
+            loss_all = loss_all.at[element_indices].set(loss_level)
+            loss_l1_all = loss_l1_all.at[element_indices].set(loss_l1_level)
+        return loss_all, loss_l1_all
     
     def loss_fn_ic(self, params):
         return jnp.mean((self.u_eval(params, self.tx_t0) - self.u_t0)**2)
@@ -602,7 +676,17 @@ class MinMaxOptProb2D:
             batch_size = int(0.8 * self.pwp.N_elements)
             element_indices_sampled = jax.random.choice(key, jnp.arange(self.pwp.N_elements), shape=(batch_size,), p=importance_probs)
             p_coeffs_all = self.pwp.coeffs[element_indices_sampled][:, None, :]
-            loss_per_elem, _ = self.vmap_loss_fn_elem_int_per_elem(element_indices_sampled, p_coeffs_all, params)
+            if self.adaptive_quadrature_is_active():
+                quad_points_parti, quad_weights_parti = self.pwp.get_adaptive_quadrature_for_elements(element_indices_sampled)
+                loss_per_elem, _ = self.vmap_loss_fn_elem_int_per_elem_quad(
+                    element_indices_sampled,
+                    p_coeffs_all,
+                    params,
+                    quad_points_parti,
+                    quad_weights_parti,
+                )
+            else:
+                loss_per_elem, _ = self.vmap_loss_fn_elem_int_per_elem(element_indices_sampled, p_coeffs_all, params)
             loss_per_elem = jnp.squeeze(loss_per_elem, axis=-1)
             weighted_loss_per_elem = loss_per_elem / importance_probs[element_indices_sampled]
             interior_loss = jnp.sum(weighted_loss_per_elem) / batch_size
@@ -610,7 +694,10 @@ class MinMaxOptProb2D:
         else:
             element_indices = jnp.arange(self.pwp.N_elements)
             p_coeffs_all = self.pwp.coeffs[:, None, :]
-            loss_per_elem, _ = self.vmap_loss_fn_elem_int_per_elem(element_indices, p_coeffs_all, params)
+            if self.adaptive_quadrature_is_active():
+                loss_per_elem, _ = self.loss_fn_elem_int_candidates(params, p_coeffs_all)
+            else:
+                loss_per_elem, _ = self.vmap_loss_fn_elem_int_per_elem(element_indices, p_coeffs_all, params)
             interior_loss = jnp.sum(loss_per_elem)
             return interior_loss
         
@@ -770,7 +857,10 @@ class MinMaxOptProb2D:
             self.opt_state_list.append(opt_state)
 
             self.gen_funcs(grade_idx)
-            self.maximize_kh = jit(self.maximize_kh_step)
+            self.adaptive_quadrature_active = False
+            if self.using_adaptive_quadrature():
+                self.pwp.reset_adaptive_quadrature()
+            self.set_maximize_kh_fn()
             if self.loss_type not in ['pinn', 'cai']:
                 self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params, self.key)
                 if self.use_importance_sampling:
@@ -803,8 +893,14 @@ class MinMaxOptProb2D:
                     loss_eqn, loss_ibc, self.key, params, opt_state = self.train_step(params, optimizer, opt_state, self.importance_probs, self.key)
                 else:
                     loss_eqn, loss_ibc, params, opt_state = self.train_step(params, optimizer, opt_state)
-                if iter % self.f_opt_kh == 0 and self.loss_type not in ['pinn', 'cai']:
+                quad_updated = False
+                if self.should_update_adaptive_quadrature(iter, grade_epochs[grade_idx]):
+                    self.update_adaptive_quadrature(params)
+                    quad_updated = True
+                if (iter % self.f_opt_kh == 0 or quad_updated) and self.loss_type not in ['pinn', 'cai']:
                     self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params, self.key)
+                    if self.use_importance_sampling:
+                        self.update_importance_probs(loss_each_elem)
                 loss_eqn = self.loss_fn_eqn(params)
                 self.loss_eqn_history[grade_idx].append(loss_eqn)
                 self.loss_bc_history[grade_idx].append(loss_ibc)
@@ -870,19 +966,23 @@ class MinMaxOptProb2D:
         # Stage 2: Refinement of Last k Grades
         if self.k > 0 and self.k <= self.total_grade:
             start_time = time.perf_counter()
-            if self.gamma > 0.0 and self.adjust_gamma:
-                self.gamma = self.determine_equation_weight(gamma_init=self.gamma)
             print(f"\nStage 2: Refining Last {self.k} Grades")
             self.gen_funcs()
-            self.maximize_kh = jit(self.maximize_kh_step)
-            loss_eqn_fn = jit(self.loss_fn_eqn)
+            self.adaptive_quadrature_active = False
+            if self.using_adaptive_quadrature():
+                self.pwp.reset_adaptive_quadrature()
+            self.set_maximize_kh_fn()
+            loss_eqn_fn = self.loss_fn_eqn if self.using_adaptive_quadrature() else jit(self.loss_fn_eqn)
             loss_data_fn = jit(self.loss_fn_ibc)
             params_last_k = [mlp.params for mlp in self.model.mlps[-self.k:]]
             self.opt_state_stage2 = self.optimizer_stage2.init(params_last_k)
+            self.params_stage2 = params_last_k
             optimizer = self.optimizer_stage2
             opt_state = self.opt_state_stage2
+            if self.gamma > 0.0 and self.adjust_gamma:
+                self.gamma = self.determine_equation_weight(gamma_init=self.gamma)
             if self.loss_type not in ['pinn', 'cai']:
-                self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1 = self.maximize_kh(params_last_k, self.key)
+                self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params_last_k, self.key)
             monitor_start = int(0.9 * self.epoch_stage2)
             best_loss_eqn = float('inf')
             best_params_last_k = None
@@ -891,8 +991,12 @@ class MinMaxOptProb2D:
                     self.update_adaptive_weights(params_last_k)
                     print(f"Stage 2, Iter {iter}, lambda_ic: {self.lambda_ic:.6f}, lambda_bc: {self.lambda_bc:.6f}, lambda_eqn: {self.lambda_eqn:.6f}")
                 loss_eqn, loss_ibc, params_last_k, opt_state = self.train_step(params_last_k, optimizer, opt_state)
-                if iter % self.f_opt_kh == 0 and self.loss_type not in ['pinn', 'cai']:
-                    self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1 = self.maximize_kh(params_last_k, self.key)
+                quad_updated = False
+                if self.should_update_adaptive_quadrature(iter, self.epoch_stage2):
+                    self.update_adaptive_quadrature(params_last_k)
+                    quad_updated = True
+                if (iter % self.f_opt_kh == 0 or quad_updated) and self.loss_type not in ['pinn', 'cai']:
+                    self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(params_last_k, self.key)
                 loss_eqn = loss_eqn_fn(params_last_k)
                 loss_ibc = loss_data_fn(params_last_k)
                 if iter >= monitor_start:
@@ -958,6 +1062,8 @@ class MinMaxOptProb2D:
         
         loss_data_fn = self.loss_fn_ibc
         loss_eqn_fn = self.loss_fn_eqn
+        if self.loss_type not in ['pinn', 'cai'] and not hasattr(self, "maximize_kh"):
+            self.set_maximize_kh_fn()
         
         for trial in range(max_trials):
             print(f"The gamma of {trial + 1}th trials is {gamma}.")
@@ -975,13 +1081,20 @@ class MinMaxOptProb2D:
             loss_history_data = []
             loss_history_eqn = []
             if self.loss_type not in ['pinn', 'cai']:
-                self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1 = self.maximize_kh(current_params, self.key)
+                self.adaptive_quadrature_active = False
+                if self.using_adaptive_quadrature():
+                    self.pwp.reset_adaptive_quadrature()
+                self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(current_params, self.key)
             for iter in range(self.N_test_gamma):
                 (loss, (loss_eqn, loss_data)), grads = jax.value_and_grad(total_loss, has_aux=True)(current_params)
                 updates, current_opt_state = optimizer.update(grads, current_opt_state)
                 current_params = optax.apply_updates(current_params, updates)
-                if iter % self.f_opt_kh == 0 and self.loss_type not in ['pinn', 'cai']:
-                    self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1 = self.maximize_kh(current_params, self.key)
+                quad_updated = False
+                if self.should_update_adaptive_quadrature(iter, self.N_test_gamma):
+                    self.update_adaptive_quadrature(current_params)
+                    quad_updated = True
+                if (iter % self.f_opt_kh == 0 or quad_updated) and self.loss_type not in ['pinn', 'cai']:
+                    self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(current_params, self.key)
                 # Store losses
                 loss_eqn = loss_eqn_fn(current_params)
                 loss_data = loss_data_fn(current_params)
@@ -1056,7 +1169,7 @@ class MinMaxOptProb2D:
         lb = loaded_data['lb']
         ub = loaded_data['ub']
         use_a = loaded_data['use_a']
-        self.model = MG_NN(input_dim=2, hidden_dims_list=loaded_hidden_dims_list, activation=nn.tanh, lb=lb, ub=ub, use_a=use_a)
+        self.model = MG_NN(input_dim=self.input_dim, hidden_dims_list=loaded_hidden_dims_list, activation=nn.tanh, lb=lb, ub=ub, use_a=use_a)
         for i in range(loaded_total_grade):
             self.model.add_grade()  # Add a new grade
         for mlp, params in zip(self.model.mlps, loaded_params):
@@ -1064,7 +1177,10 @@ class MinMaxOptProb2D:
         print(f"Model loaded from {model_path} with hidden_dims_list: {loaded_hidden_dims_list}, loaded_total_grade = {loaded_data['total_grade']}.")
         self.opt_state_list = [opt.init(mlp.params) for opt, mlp in zip(self.optimizer_list, self.model.mlps)]
         self.gen_funcs(loaded_total_grade-1)
-        self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1 = self.maximize_kh_step(loaded_params[-1], self.key)
+        self.adaptive_quadrature_active = False
+        if self.using_adaptive_quadrature():
+            self.pwp.reset_adaptive_quadrature()
+        self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh_step(loaded_params[-1], self.key)
         loss_eqn = self.loss_fn_eqn(loaded_params[-1])
         loss_ibc = self.loss_fn_ibc(loaded_params[-1])
         print(f"For the loaded model, loss_eqn: {loss_eqn:.6f}, Loss_bc: {loss_ibc:.6f}")
