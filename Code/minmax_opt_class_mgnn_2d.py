@@ -295,7 +295,7 @@ class MinMaxOptProb2D:
     def should_update_adaptive_quadrature(self, iter, grade_epoch):
         if not self.using_adaptive_quadrature():
             return False
-        adapt_start = int(np.ceil(0.25 * grade_epoch))
+        adapt_start = int(np.ceil(0.0 * grade_epoch))
         return iter >= adapt_start and (iter - adapt_start) % self.f_quad_adapt == 0
 
     def gen_ibc(self):
@@ -378,7 +378,7 @@ class MinMaxOptProb2D:
         
         perturbed_coeffs_all = init_coeffs_all[:, None, :] + perturbations_all[None, :, :]
         if self.adaptive_quadrature_is_active():
-            loss_all_test, loss_l1_all = self.loss_fn_elem_int_candidates(params, perturbed_coeffs_all)
+            loss_all_test, loss_l1_all = self.vmap_loss_fn_elem_int_per_elem_adaptive(params, perturbed_coeffs_all)
         else:
             loss_all_test, loss_l1_all = self.vmap_loss_fn_elem_int_per_elem(jnp.arange(Nt), perturbed_coeffs_all, params)
         best_indices = jnp.argmax(loss_all_test, axis=1)
@@ -458,14 +458,29 @@ class MinMaxOptProb2D:
         loss_l1 = jnp.dot(jnp.abs(residual), quad_weights)
         return loss, loss_l1
 
-    def loss_fn_elem_int_candidates(self, params, p_coeffs_all):
+    def vmap_loss_fn_elem_int_per_elem_adaptive(self, params, p_coeffs_all):
+        """
+        Evaluate element losses by quadrature level.
+
+        Each level is evaluated as one element batch, so all elements inside a
+        vmap call have the same number of quadrature points.
+        """
         Nt = self.pwp.N_elements
         loss_all = jnp.zeros(p_coeffs_all.shape[:2])
         loss_l1_all = jnp.zeros(Nt)
-        for level, element_indices in ((0, self.pwp.level0_element_indices), (1, self.pwp.level1_element_indices)):
-            if element_indices.size == 0:
-                continue
-            _, quad_points_parti, quad_weights_parti = self.pwp.get_quadrature_by_level(level, element_indices)
+
+        element_indices = self.pwp.level0_element_indices
+        if element_indices.size > 0:
+            loss_level, loss_l1_level = self.vmap_loss_fn_elem_int_per_elem(
+                element_indices,
+                p_coeffs_all[element_indices],
+                params,
+            )
+            loss_all = loss_all.at[element_indices].set(loss_level)
+            loss_l1_all = loss_l1_all.at[element_indices].set(loss_l1_level)
+
+        element_indices, quad_points_parti, quad_weights_parti = self.pwp.get_quadrature_group_by_level(1)
+        if element_indices.size > 0:
             loss_level, loss_l1_level = self.vmap_loss_fn_elem_int_per_elem_quad(
                 element_indices,
                 p_coeffs_all[element_indices],
@@ -706,7 +721,7 @@ class MinMaxOptProb2D:
             element_indices = jnp.arange(self.pwp.N_elements)
             p_coeffs_all = self.pwp.coeffs[:, None, :]
             if self.adaptive_quadrature_is_active():
-                loss_per_elem, _ = self.loss_fn_elem_int_candidates(params, p_coeffs_all)
+                loss_per_elem, _ = self.vmap_loss_fn_elem_int_per_elem_adaptive(params, p_coeffs_all)
             else:
                 loss_per_elem, _ = self.vmap_loss_fn_elem_int_per_elem(element_indices, p_coeffs_all, params)
             interior_loss = jnp.sum(self.element_loss_weights()[:, None] * loss_per_elem)

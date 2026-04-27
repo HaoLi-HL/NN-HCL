@@ -53,6 +53,9 @@ class PiecewiseLinearPolynomialsHex:
         self.element_loss_weights = jnp.ones(self.N_elements)
         self.level0_element_indices = jnp.arange(self.N_elements)
         self.level1_element_indices = jnp.array([], dtype=jnp.int32)
+        self.quad_points_parti_level1 = jnp.zeros((0, self.Nq_by_level[1], 3), dtype=self.partitions.dtype)
+        self.quad_weights_parti_level1 = jnp.zeros((0, self.Nq_by_level[1]), dtype=self.quad_weights_parti.dtype)
+        self.level1_cache_positions = -jnp.ones(self.N_elements, dtype=jnp.int32)
         self.bdry_points_parti, self.bdry_weights_parti = self.get_boundary_quadrature()
         self.normals = self.compute_normals()
 
@@ -64,9 +67,9 @@ class PiecewiseLinearPolynomialsHex:
         """
         Setup tensor-product trapezoidal quadrature on the unit cube.
 
-        The reference bank is small and level-dependent only. Physical points
-        for selected elements are generated from it on demand to avoid storing
-        a full level-1 quadrature tensor for every element.
+        The reference bank is small and level-dependent only. Physical level-1
+        points are cached only for selected refined elements to avoid storing a
+        full level-1 quadrature tensor for every element.
         """
         num_intervals = 2 ** rf_times
         num_points = num_intervals + 1
@@ -153,13 +156,15 @@ class PiecewiseLinearPolynomialsHex:
         Return physical quadrature points and weights for a level.
 
         Level 0 uses the existing full per-element arrays. Level 1 is generated
-        only for requested elements; requesting all level-1 elements at once is
-        intentionally avoided to limit GPU memory use.
+        only for requested elements; the selected refined level-1 group is
+        cached separately after each adaptive update.
         """
         if element_indices is None:
             if level == 0:
                 return self.Nq_level0, self.quad_points_parti, self.quad_weights_parti
-            raise ValueError("element_indices must be provided for level-1 quadrature.")
+            if level == 1:
+                return self.Nq_by_level[1], self.quad_points_parti_level1, self.quad_weights_parti_level1
+            raise ValueError("level must be 0 or 1.")
 
         element_indices = jnp.asarray(element_indices, dtype=jnp.int32)
         if level == 0:
@@ -176,12 +181,29 @@ class PiecewiseLinearPolynomialsHex:
         weights = jnp.broadcast_to(weights, (element_indices.shape[0], ref_weights.shape[0]))
         return self.Nq_by_level[1], points, weights
 
+    def get_quadrature_group_by_level(self, level):
+        """
+        Return the current element group and stored quadrature arrays for one level.
+
+        This is the adaptive-loss path. Level 0 gathers from the stored full
+        level-0 bank. Level 1 returns the cached selected refined bank.
+        """
+        if level == 0:
+            element_indices = self.level0_element_indices
+            return element_indices, self.quad_points_parti[element_indices], self.quad_weights_parti[element_indices]
+        if level == 1:
+            return self.level1_element_indices, self.quad_points_parti_level1, self.quad_weights_parti_level1
+        raise ValueError("level must be 0 or 1.")
+
     def reset_adaptive_quadrature(self):
         self.quad_levels = jnp.zeros(self.N_elements, dtype=jnp.int32)
         self.eta_osc = jnp.zeros(self.N_elements)
         self.element_loss_weights = jnp.ones(self.N_elements)
         self.level0_element_indices = jnp.arange(self.N_elements)
         self.level1_element_indices = jnp.array([], dtype=jnp.int32)
+        self.quad_points_parti_level1 = jnp.zeros((0, self.Nq_by_level[1], 3), dtype=self.partitions.dtype)
+        self.quad_weights_parti_level1 = jnp.zeros((0, self.Nq_by_level[1]), dtype=self.quad_weights_parti.dtype)
+        self.level1_cache_positions = -jnp.ones(self.N_elements, dtype=jnp.int32)
 
     def compute_oscillation_indicator(self, u_values_parti):
         return jnp.max(u_values_parti, axis=1) - jnp.min(u_values_parti, axis=1)
@@ -224,12 +246,22 @@ class PiecewiseLinearPolynomialsHex:
         level0_element_indices = jnp.where(quad_levels == 0)[0]
         element_loss_weights = jnp.ones(self.N_elements)
         element_loss_weights = element_loss_weights.at[level1_element_indices].set(2)
+        if top_count == 0:
+            quad_points_parti_level1 = jnp.zeros((0, self.Nq_by_level[1], 3), dtype=self.partitions.dtype)
+            quad_weights_parti_level1 = jnp.zeros((0, self.Nq_by_level[1]), dtype=self.quad_weights_parti.dtype)
+        else:
+            _, quad_points_parti_level1, quad_weights_parti_level1 = self.get_quadrature_by_level(1, level1_element_indices)
+        level1_cache_positions = -jnp.ones(self.N_elements, dtype=jnp.int32)
+        level1_cache_positions = level1_cache_positions.at[level1_element_indices].set(jnp.arange(top_count, dtype=jnp.int32))
 
         self.quad_levels = quad_levels
         self.eta_osc = eta_osc
         self.element_loss_weights = element_loss_weights
         self.level0_element_indices = level0_element_indices
         self.level1_element_indices = level1_element_indices
+        self.quad_points_parti_level1 = quad_points_parti_level1
+        self.quad_weights_parti_level1 = quad_weights_parti_level1
+        self.level1_cache_positions = level1_cache_positions
         return eta_osc, level1_element_indices
 
     def _pad_level0_quadrature_subset(self, element_indices):
@@ -253,7 +285,11 @@ class PiecewiseLinearPolynomialsHex:
         element_indices = jnp.asarray(element_indices, dtype=jnp.int32)
         levels = self.quad_levels[element_indices]
         points0, weights0 = self._pad_level0_quadrature_subset(element_indices)
-        _, points1, weights1 = self.get_quadrature_by_level(1, element_indices)
+        if self.level1_element_indices.size == 0:
+            return points0, weights0
+        level1_positions = jnp.maximum(self.level1_cache_positions[element_indices], 0)
+        points1 = self.quad_points_parti_level1[level1_positions]
+        weights1 = self.quad_weights_parti_level1[level1_positions]
         level_mask_points = levels[:, None, None].astype(bool)
         level_mask_weights = levels[:, None].astype(bool)
         return jnp.where(level_mask_points, points1, points0), jnp.where(level_mask_weights, weights1, weights0)
