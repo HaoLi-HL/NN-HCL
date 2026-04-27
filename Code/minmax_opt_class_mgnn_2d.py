@@ -295,7 +295,8 @@ class MinMaxOptProb2D:
     def should_update_adaptive_quadrature(self, iter, grade_epoch):
         if not self.using_adaptive_quadrature():
             return False
-        adapt_start = int(np.ceil(0.0 * grade_epoch))
+        adapt_start = int(np.ceil(0.05 * grade_epoch))
+        adapt_start = 1
         return iter >= adapt_start and (iter - adapt_start) % self.f_quad_adapt == 0
 
     def gen_ibc(self):
