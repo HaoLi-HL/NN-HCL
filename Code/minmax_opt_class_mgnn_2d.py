@@ -38,8 +38,8 @@ class MinMaxOptProb2D:
                  flux=None, res=None, bc_type='Dirichlet', loss_type='interior', k=0, use_a=True, M_t = 1000, M_x = 1000, f_plot=1000, plt_err_dist=False, plt_mesh=False,
                  partition='tri', p_dof=None, dg_type='P1', use_importance_sampling=False, u_ref=None, pre_epochs=1000, pre_train='',
                  seq_train=False, set_wandb=False, use_adaptive_quadrature=True,
-                 adaptive_quad_top_fraction=None, f_quad_adapt=1000, adaptive_quad_max_points=65536,
-                 adaptive_quad_indicator='quad', adapt_start=None):
+                 adaptive_quad_top_fraction=None, adaptive_quad_top_count=None, f_quad_adapt=1000, adaptive_quad_max_points=65536,
+                 adaptive_quad_indicator='quad', adapt_start=None, kh_batch_size=10000):
         self.input_dim = input_dim
         
         self.seq_train = seq_train  # Sequential training flag
@@ -104,6 +104,7 @@ class MinMaxOptProb2D:
         self.key = jax.random.PRNGKey(seed)
         self.sigma = sigma
         self.N_perturb = N_perturb
+        self.kh_batch_size = max(1, int(kh_batch_size))
         self.N_bc = N_bc
         self.N_ic = N_ic
         self.t_bc = jnp.linspace(t_min, t_max, self.N_bc)
@@ -217,6 +218,7 @@ class MinMaxOptProb2D:
             and self.loss_type == 'interior'
         )
         self.adaptive_quad_top_fraction = adaptive_quad_top_fraction
+        self.adaptive_quad_top_count = adaptive_quad_top_count
         self.f_quad_adapt = max(1, int(f_quad_adapt))
         self.adaptive_quad_max_points = adaptive_quad_max_points
         self.adaptive_quad_indicator = adaptive_quad_indicator.lower()
@@ -241,10 +243,12 @@ class MinMaxOptProb2D:
                            "f_adaptive_weight": f_adaptive_weight,
                            "alpha": alpha,
                            "N_perturb": N_perturb,
+                           "kh_batch_size": self.kh_batch_size,
                            "sigma": sigma,
                            "L1reg": L1reg,
                            "use_adaptive_quadrature": self.use_adaptive_quadrature,
                            "adaptive_quad_top_fraction": adaptive_quad_top_fraction,
+                           "adaptive_quad_top_count": adaptive_quad_top_count,
                            "f_quad_adapt": self.f_quad_adapt,
                            "adaptive_quad_max_points": adaptive_quad_max_points,
                            "adaptive_quad_indicator": self.adaptive_quad_indicator,
@@ -294,6 +298,7 @@ class MinMaxOptProb2D:
             eta, level1_indices = self.pwp.update_adaptive_quadrature_by_indicator(
                 eta_osc,
                 top_fraction=self.adaptive_quad_top_fraction,
+                top_count=self.adaptive_quad_top_count,
                 indicator_name='osc',
             )
         elif indicator in ('quad', 'quad_diff', 'quadrature_difference'):
@@ -306,6 +311,7 @@ class MinMaxOptProb2D:
             eta, level1_indices = self.pwp.update_adaptive_quadrature_by_indicator(
                 eta_quad,
                 top_fraction=self.adaptive_quad_top_fraction,
+                top_count=self.adaptive_quad_top_count,
                 indicator_name='quad',
             )
         else:
@@ -388,40 +394,143 @@ class MinMaxOptProb2D:
         else:
             self.loss_fn_elem_int_per_elem_adaptive = None
 
-    def maximize_kh_step(self, params, current_key):
+    def sample_kh_perturbations(self, key, batch_size):
+        if self.sampling_method == 'normal':
+            return self.sigma * jax.random.normal(key, (batch_size, self.p_dof))
+        if self.sampling_method == 'uniform':
+            return self.sigma * jax.random.uniform(key, (batch_size, self.p_dof), minval=-1, maxval=1)
+        raise ValueError("sampling_method must be 'normal' or 'uniform'.")
+
+    def init_kh_coeffs(self, params):
         Nt = self.pwp.N_elements
-        # find proper kh by generating samples for each triangle/rectangle
-        key, current_key = jax.random.split(current_key)
         if self.sampling_method == 'normal':
             vertices_all = self.pwp.partitions
             num_vertices = vertices_all.shape[1]
             u_values_all = self.u_eval(params, vertices_all.reshape(-1, self.input_dim)).reshape(Nt, num_vertices)
             A_all = jnp.concatenate([jnp.ones((Nt, num_vertices, 1)), vertices_all.reshape(Nt, num_vertices, self.input_dim)], axis=-1)  # (Nt, num_vertices, p_dof)
-            init_coeffs_all = vmap(jnp.linalg.lstsq, in_axes=(0, 0))(A_all, u_values_all[..., None])[0].squeeze(-1)  # Least squares for overdetermined
-            perturbations_all = self.sigma * jax.random.normal(key, (self.N_perturb, self.p_dof))
-        elif self.sampling_method == 'uniform':
+            return vmap(jnp.linalg.lstsq, in_axes=(0, 0))(A_all, u_values_all[..., None])[0].squeeze(-1)  # Least squares for overdetermined
+        if self.sampling_method == 'uniform':
             quad_points = self.pwp.quad_points_parti
             u_values_all = self.u_eval(params, quad_points)
             quad_weights = self.pwp.quad_weights_parti
             avg_vals = jnp.einsum('ij,ij->i', u_values_all, quad_weights)/self.elem_meas
             if self.dg_type == 'P1':
-                init_coeffs_all = jnp.hstack([avg_vals[..., None] , jnp.zeros((Nt, self.p_dof - 1))])
-            elif self.dg_type == 'Q1':
-                init_coeffs_all = jnp.tile(avg_vals[..., None], (1, self.p_dof))
-            # print(f"init_coeffs_all.shape: {init_coeffs_all.shape}, avg_vals.shape: {avg_vals.shape}")
-            perturbations_all = self.sigma * jax.random.uniform(key, (self.N_perturb, self.p_dof), minval=-1, maxval=1)
-        
-        perturbed_coeffs_all = init_coeffs_all[:, None, :] + perturbations_all[None, :, :]
-        if self.adaptive_quadrature_is_active():
-            loss_all_test, loss_l1_all = self.loss_fn_elem_int_per_elem_adaptive(params, perturbed_coeffs_all)
-        else:
-            loss_all_test, loss_l1_all = self.vmap_loss_fn_elem_int_per_elem(jnp.arange(Nt), perturbed_coeffs_all, params)
-        best_indices = jnp.argmax(loss_all_test, axis=1)
-        loss_each_elem = loss_all_test[jnp.arange(Nt), best_indices]
+                return jnp.hstack([avg_vals[..., None] , jnp.zeros((Nt, self.p_dof - 1))])
+            if self.dg_type == 'Q1':
+                return jnp.tile(avg_vals[..., None], (1, self.p_dof))
+        raise ValueError("sampling_method must be 'normal' or 'uniform'.")
+
+    def update_best_kh_from_loss_batch(self, init_coeffs, perturbations, loss_batch, best_loss, best_coeffs):
+        element_count = loss_batch.shape[0]
+        batch_best_indices = jnp.argmax(loss_batch, axis=1)
+        batch_best_loss = loss_batch[jnp.arange(element_count), batch_best_indices]
+        batch_best_coeffs = init_coeffs + perturbations[batch_best_indices]
+        improved = batch_best_loss > best_loss
+        best_loss = jnp.where(improved, batch_best_loss, best_loss)
+        best_coeffs = jnp.where(improved[:, None], batch_best_coeffs, best_coeffs)
+        return best_loss, best_coeffs
+
+    def maximize_kh_nonadaptive_batch(self, params, init_coeffs_all, perturbations, best_loss, best_coeffs, loss_l1_all):
+        Nt = self.pwp.N_elements
+        p_coeffs_batch = init_coeffs_all[:, None, :] + perturbations[None, :, :]
+        loss_batch, loss_l1_batch = self.vmap_loss_fn_elem_int_per_elem(jnp.arange(Nt), p_coeffs_batch, params)
+        best_loss, best_coeffs = self.update_best_kh_from_loss_batch(
+            init_coeffs_all,
+            perturbations,
+            loss_batch,
+            best_loss,
+            best_coeffs,
+        )
+        return best_loss, best_coeffs, loss_l1_batch
+
+    def maximize_kh_adaptive_level_batch(
+        self,
+        loss_fn_elem_int_per_elem_level,
+        local_indices,
+        element_indices,
+        params,
+        init_coeffs_all,
+        perturbations,
+        best_loss,
+        best_coeffs,
+        loss_l1_all,
+    ):
+        if loss_fn_elem_int_per_elem_level is None:
+            return best_loss, best_coeffs, loss_l1_all
+        init_coeffs_level = init_coeffs_all[element_indices]
+        p_coeffs_level = init_coeffs_level[:, None, :] + perturbations[None, :, :]
+        loss_level, loss_l1_level = loss_fn_elem_int_per_elem_level(local_indices, p_coeffs_level, params)
+        best_loss_level, best_coeffs_level = self.update_best_kh_from_loss_batch(
+            init_coeffs_level,
+            perturbations,
+            loss_level,
+            best_loss[element_indices],
+            best_coeffs[element_indices],
+        )
+        best_loss = best_loss.at[element_indices].set(best_loss_level)
+        best_coeffs = best_coeffs.at[element_indices].set(best_coeffs_level)
+        loss_l1_all = loss_l1_all.at[element_indices].set(loss_l1_level)
+        return best_loss, best_coeffs, loss_l1_all
+
+    def maximize_kh_adaptive_batch(self, params, init_coeffs_all, perturbations, best_loss, best_coeffs, loss_l1_all):
+        best_loss, best_coeffs, loss_l1_all = self.maximize_kh_adaptive_level_batch(
+            self.loss_fn_elem_int_per_elem_level0,
+            self.local_indices_level0,
+            self.element_indices_level0,
+            params,
+            init_coeffs_all,
+            perturbations,
+            best_loss,
+            best_coeffs,
+            loss_l1_all,
+        )
+        best_loss, best_coeffs, loss_l1_all = self.maximize_kh_adaptive_level_batch(
+            self.loss_fn_elem_int_per_elem_level1,
+            self.local_indices_level1,
+            self.element_indices_level1,
+            params,
+            init_coeffs_all,
+            perturbations,
+            best_loss,
+            best_coeffs,
+            loss_l1_all,
+        )
+        return best_loss, best_coeffs, loss_l1_all
+
+    def maximize_kh_step(self, params, current_key):
+        Nt = self.pwp.N_elements
+        key, current_key = jax.random.split(current_key)
+        init_coeffs_all = self.init_kh_coeffs(params)
+        best_loss = -jnp.inf * jnp.ones(Nt)
+        best_coeffs_all = init_coeffs_all
+        loss_l1_all = jnp.zeros(Nt)
+
+        for batch_start in range(0, self.N_perturb, self.kh_batch_size):
+            batch_size = min(self.kh_batch_size, self.N_perturb - batch_start)
+            batch_key = jax.random.fold_in(key, batch_start)
+            perturbations = self.sample_kh_perturbations(batch_key, batch_size)
+            if self.adaptive_quadrature_is_active():
+                best_loss, best_coeffs_all, loss_l1_all = self.maximize_kh_adaptive_batch(
+                    params,
+                    init_coeffs_all,
+                    perturbations,
+                    best_loss,
+                    best_coeffs_all,
+                    loss_l1_all,
+                )
+            else:
+                best_loss, best_coeffs_all, loss_l1_all = self.maximize_kh_nonadaptive_batch(
+                    params,
+                    init_coeffs_all,
+                    perturbations,
+                    best_loss,
+                    best_coeffs_all,
+                    loss_l1_all,
+                )
+
+        loss_each_elem = best_loss
         loss_eqn = jnp.sum(self.element_loss_weights() * loss_each_elem)
-        # Compute absolute loss, which is the L1 norm of the residual. Just for comparison and debugging. We do not use it in the optimization.
         loss_l1 = jnp.sum(loss_l1_all)
-        best_coeffs_all = perturbed_coeffs_all[jnp.arange(Nt), best_indices]
         return best_coeffs_all, current_key, loss_eqn, loss_l1, loss_each_elem
 
     def loss_fn_elem_int_per_elem(self, parti_idx, p_coeffs_all, params):
@@ -526,6 +635,13 @@ class MinMaxOptProb2D:
                                                                                     level1_quad_points,
                                                                                     level1_quad_weights,
                                                                                     )
+        self.element_indices_level0 = level0_indices
+        self.element_indices_level1 = level1_indices
+        self.local_indices_level0 = local_indices0
+        self.local_indices_level1 = local_indices1
+        self.loss_fn_elem_int_per_elem_level0 = loss_fn_elem_int_per_elem_level0
+        self.loss_fn_elem_int_per_elem_level1 = loss_fn_elem_int_per_elem_level1
+
         def loss_fn_elem_int_per_elem_adaptive(params, p_coeffs_all):
             loss_all = jnp.zeros(p_coeffs_all.shape[:2])
             loss_l1_all = jnp.zeros(Nt)

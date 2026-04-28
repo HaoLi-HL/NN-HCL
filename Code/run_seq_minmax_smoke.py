@@ -30,12 +30,14 @@ def build_args():
     parser.add_argument("--n-bc", type=int, default=4)
     parser.add_argument("--n-ic", type=int, default=4)
     parser.add_argument("--n-perturb", type=int, default=2)
+    parser.add_argument("--kh-batch-size", type=int, default=10000)
     parser.add_argument("--hidden-width", type=int, default=4)
     parser.add_argument("--grade-epochs", type=int, default=1)
     parser.add_argument("--k-h-rf-times", type=int, default=1)
     parser.add_argument("--stage2-k", type=int, default=0)
     parser.add_argument("--stage2-epochs", type=int, default=0)
     parser.add_argument("--adaptive-quad-top-fraction", type=float, default=None)
+    parser.add_argument("--adaptive-quad-top-count", type=int, default=None)
     parser.add_argument("--adapt-start", type=float, default=None)
     parser.add_argument(
         "--adaptive-quad-indicator",
@@ -75,6 +77,7 @@ def make_problem(args):
         seed=0,
         sigma=0.1,
         N_perturb=args.n_perturb,
+        kh_batch_size=args.kh_batch_size,
         k_h_rf_times=args.k_h_rf_times,
         f_opt_kh=1,
         u0=u0,
@@ -102,6 +105,7 @@ def make_problem(args):
         use_importance_sampling=args.importance_sampling,
         use_adaptive_quadrature=not args.disable_adaptive_quadrature,
         adaptive_quad_top_fraction=args.adaptive_quad_top_fraction,
+        adaptive_quad_top_count=args.adaptive_quad_top_count,
         adaptive_quad_indicator=args.adaptive_quad_indicator,
         adapt_start=args.adapt_start,
     )
@@ -122,15 +126,22 @@ def assert_smoke_result(seq):
     print(f"final equation loss: {float(final_loss):.6e}")
     print(f"adaptive_quad_top_fraction stored on seq: {seq.adaptive_quad_top_fraction}")
     print(f"adaptive_quad_top_fraction stored on segment: {segment.adaptive_quad_top_fraction}")
+    print(f"adaptive_quad_top_count stored on seq: {seq.adaptive_quad_top_count}")
+    print(f"adaptive_quad_top_count stored on segment: {segment.adaptive_quad_top_count}")
+    print(f"kh_batch_size stored on seq: {seq.kh_batch_size}")
+    print(f"kh_batch_size stored on segment: {segment.kh_batch_size}")
     print(f"adapt_start stored on seq: {seq.adapt_start}")
     print(f"adapt_start stored on segment: {segment.adapt_start}")
     print(f"using_adaptive_quadrature: {segment.using_adaptive_quadrature()}")
 
     if segment.using_adaptive_quadrature():
-        fraction = segment.adaptive_quad_top_fraction
-        if fraction is None:
-            fraction = 2.0 / segment.N_x
-        expected = int(jnp.ceil(fraction * segment.pwp.N_elements))
+        if segment.adaptive_quad_top_count is None:
+            fraction = segment.adaptive_quad_top_fraction
+            if fraction is None:
+                fraction = 2.0 / segment.N_x
+            expected = int(jnp.ceil(fraction * segment.pwp.N_elements))
+        else:
+            expected = max(0, min(segment.pwp.N_elements, int(segment.adaptive_quad_top_count)))
         actual = int(segment.pwp.level1_element_indices.shape[0])
         print(f"level-1 quadrature elements: actual={actual}, expected={expected}")
         if actual != expected:

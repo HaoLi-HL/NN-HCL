@@ -25,8 +25,8 @@ class SeqMinMaxOptProb:
                  flux=None, res=None, bc_type='Dirichlet', loss_type='interior',  k=0, use_a=True, f_plot=1000, plt_err_dist=False, plt_mesh=False,
                  partition='tri', dg_type='P1', use_importance_sampling=False, u_ref=None, pre_epochs=1000, pre_train='',
                  M_t=1000, M_x=2000, set_wandb=False, use_adaptive_quadrature=True,
-                 adaptive_quad_top_fraction=None, f_quad_adapt=1000, adaptive_quad_max_points=65536,
-                 adaptive_quad_indicator='quad', adapt_start=None):
+                 adaptive_quad_top_fraction=None, adaptive_quad_top_count=None, f_quad_adapt=1000, adaptive_quad_max_points=65536,
+                 adaptive_quad_indicator='quad', adapt_start=None, kh_batch_size=10000):
         """
         Initialize the sequential training class.
 
@@ -76,6 +76,7 @@ class SeqMinMaxOptProb:
         self.seed = seed
         self.sigma = sigma
         self.N_perturb = N_perturb
+        self.kh_batch_size = max(1, int(kh_batch_size))
         self.N_bc = N_bc
         self.N_ic = N_ic
         self.k_h_rf_times = k_h_rf_times
@@ -120,6 +121,7 @@ class SeqMinMaxOptProb:
         self.pre_train = pre_train  # 'ic' or 'u_ref' or ''
         self.use_adaptive_quadrature = use_adaptive_quadrature
         self.adaptive_quad_top_fraction = adaptive_quad_top_fraction
+        self.adaptive_quad_top_count = adaptive_quad_top_count
         self.f_quad_adapt = max(1, int(f_quad_adapt))
         self.adaptive_quad_max_points = adaptive_quad_max_points
         self.adaptive_quad_indicator = adaptive_quad_indicator.lower()
@@ -140,6 +142,7 @@ class SeqMinMaxOptProb:
                                "seed": seed,
                                "sigma": sigma,
                                "N_perturb": N_perturb,
+                               "kh_batch_size": self.kh_batch_size,
                                "k_h_rf_times": k_h_rf_times,
                                "lambda_ic": lambda_ic,
                                "lambda_bc": lambda_bc,
@@ -152,6 +155,7 @@ class SeqMinMaxOptProb:
                                "sampling_method": sampling_method,
                                "use_adaptive_quadrature": use_adaptive_quadrature,
                                "adaptive_quad_top_fraction": adaptive_quad_top_fraction,
+                               "adaptive_quad_top_count": adaptive_quad_top_count,
                                "f_quad_adapt": self.f_quad_adapt,
                                "adaptive_quad_max_points": adaptive_quad_max_points,
                                "adaptive_quad_indicator": self.adaptive_quad_indicator,
@@ -191,6 +195,7 @@ class SeqMinMaxOptProb:
                 t_min=t_min, t_max=t_max, x_min=self.x_min, x_max=self.x_max, y_min=self.y_min, y_max=self.y_max, N_t=self.N_t, N_x=self.N_x, N_y=self.N_y,
                 N_bc=self.N_bc, N_ic=self.N_ic, hidden_dims_list=self.hidden_dims_list, seed=self.seed, 
                 sigma=self.sigma, N_perturb=self.N_perturb, k_h_rf_times=self.k_h_rf_times, u0=current_u0, u1=self.u1, u2=self.u2, u3=self.u3, u4=self.u4,
+                kh_batch_size=self.kh_batch_size,
                 project=self.project,
                 gamma=self.gamma, alpha=self.alpha, N_test_gamma=self.N_test_gamma, adjust_gamma=self.adjust_gamma, 
                 lambda_ic=self.lambda_ic, lambda_bc=self.lambda_bc, lambda_eqn=self.lambda_eqn,
@@ -206,6 +211,7 @@ class SeqMinMaxOptProb:
                 M_t=self.M_t, M_x=self.M_x, seq_train=True, set_wandb=self.set_wandb,
                 use_adaptive_quadrature=self.use_adaptive_quadrature,
                 adaptive_quad_top_fraction=self.adaptive_quad_top_fraction,
+                adaptive_quad_top_count=self.adaptive_quad_top_count,
                 f_quad_adapt=self.f_quad_adapt,
                 adaptive_quad_max_points=self.adaptive_quad_max_points,
                 adaptive_quad_indicator=self.adaptive_quad_indicator,
@@ -289,6 +295,7 @@ def save_seq_model(seq_obj, model_path_prefix):
             'seed': seq_obj.seed,
             'sigma': seq_obj.sigma,
             'N_perturb': seq_obj.N_perturb,
+            'kh_batch_size': seq_obj.kh_batch_size,
             'N_bc': seq_obj.N_bc,
             'N_ic': seq_obj.N_ic,
             'k_h_rf_times': seq_obj.k_h_rf_times,
@@ -304,6 +311,7 @@ def save_seq_model(seq_obj, model_path_prefix):
             'set_wandb': seq_obj.set_wandb,
             'use_adaptive_quadrature': seq_obj.use_adaptive_quadrature,
             'adaptive_quad_top_fraction': seq_obj.adaptive_quad_top_fraction,
+            'adaptive_quad_top_count': seq_obj.adaptive_quad_top_count,
             'f_quad_adapt': seq_obj.f_quad_adapt,
             'adaptive_quad_max_points': seq_obj.adaptive_quad_max_points,
             'adaptive_quad_indicator': seq_obj.adaptive_quad_indicator,
