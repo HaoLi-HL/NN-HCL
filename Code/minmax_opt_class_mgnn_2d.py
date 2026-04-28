@@ -185,8 +185,9 @@ class MinMaxOptProb2D:
         self.init_lr_stage2 = init_lr_stage2
         self.epoch_stage2 = epoch_stage2
         self.decay_rate_stage2 = decay_rate_stage2
+        self.grad_clip_norm = 5.0
         lr_stage2 = optax.exponential_decay(init_value=init_lr_stage2, transition_steps=epoch_stage2, decay_rate=decay_rate_stage2, end_value=1e-6)
-        self.optimizer_stage2 = optax.adam(lr_stage2)
+        self.optimizer_stage2 = self.make_adam_optimizer(lr_stage2)
         self.opt_state_stage2 = None  # To be initialized later
 
         self.f_plot = f_plot
@@ -244,6 +245,7 @@ class MinMaxOptProb2D:
                            "alpha": alpha,
                            "N_perturb": N_perturb,
                            "kh_batch_size": self.kh_batch_size,
+                           "grad_clip_norm": self.grad_clip_norm,
                            "sigma": sigma,
                            "L1reg": L1reg,
                            "use_adaptive_quadrature": self.use_adaptive_quadrature,
@@ -334,6 +336,12 @@ class MinMaxOptProb2D:
         if 0.0 < adapt_start < 1.0:
             return int(np.ceil(adapt_start * grade_epoch))
         return int(np.ceil(adapt_start))
+
+    def make_adam_optimizer(self, learning_rate):
+        return optax.chain(
+            optax.clip_by_global_norm(self.grad_clip_norm),
+            optax.adam(learning_rate),
+        )
 
     def gen_ibc(self):
         if self.input_dim == 2:
@@ -753,7 +761,7 @@ class MinMaxOptProb2D:
         # Collect all parameters
         params = self.model.mlps[0].params
         # lr = optax.schedules.cosine_decay_schedule(init_value=pre_lr, decay_steps=pre_epochs)
-        optimizer = optax.adam(pre_lr)
+        optimizer = self.make_adam_optimizer(pre_lr)
         opt_state = optimizer.init(params)
         net_u = lambda params, quad_points: self.model.forward_with_params(params, quad_points, grade_idx=0)
         u_eval = jit(vmap(net_u, in_axes = (None, 0)))
@@ -793,7 +801,7 @@ class MinMaxOptProb2D:
 
         # Collect all parameters (pre-train the first grade)
         params = self.model.mlps[0].params
-        optimizer = optax.adam(pre_lr)
+        optimizer = self.make_adam_optimizer(pre_lr)
         opt_state = optimizer.init(params)
         net_u = lambda params, quad_points: self.model.forward_with_params(params, quad_points, grade_idx=0)
         u_eval = jit(vmap(net_u, in_axes = (None, 0)))
@@ -831,7 +839,7 @@ class MinMaxOptProb2D:
         params = self.model.mlps[0].params
         lr = optax.schedules.warmup_cosine_decay_schedule(init_value=1e-6, peak_value=pre_lr, warmup_steps=int(pre_epochs/100), 
                                                           decay_steps=pre_epochs, end_value=1e-5)
-        optimizer = optax.adam(lr)
+        optimizer = self.make_adam_optimizer(lr)
         opt_state = optimizer.init(params)
 
         def pre_loss(params):
@@ -1049,7 +1057,7 @@ class MinMaxOptProb2D:
             print(f"\nTraining Grade {grade_idx}")
             lr = optax.schedules.warmup_cosine_decay_schedule(init_value=1e-5, peak_value=self.init_lrs[grade_idx], warmup_steps=int(grade_epochs[grade_idx]/100), 
                                                               decay_steps=grade_epochs[grade_idx], end_value=1e-4)
-            optimizer = optax.adam(lr)
+            optimizer = self.make_adam_optimizer(lr)
             params = self.model.mlps[grade_idx].params
             opt_state = optimizer.init(params)
             self.optimizer_list.append(optimizer)
