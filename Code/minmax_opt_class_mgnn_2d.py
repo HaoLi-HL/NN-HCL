@@ -19,6 +19,7 @@ from PwpTri_class import PiecewiseLinearPolynomialsTri
 from PwpRect_class import PiecewiseLinearPolynomialsRect
 from PwpHex_class import PiecewiseLinearPolynomialsHex
 from PwpTetra_class import PiecewiseLinearPolynomialsTetra
+from adaptive_quad_indicators import compute_oscillation_indicator, compute_quadrature_difference_indicator
 import wandb
 from functools import partial
 
@@ -37,7 +38,8 @@ class MinMaxOptProb2D:
                  flux=None, res=None, bc_type='Dirichlet', loss_type='interior', k=0, use_a=True, M_t = 1000, M_x = 1000, f_plot=1000, plt_err_dist=False, plt_mesh=False,
                  partition='tri', p_dof=None, dg_type='P1', use_importance_sampling=False, u_ref=None, pre_epochs=1000, pre_train='',
                  seq_train=False, set_wandb=False, use_adaptive_quadrature=True,
-                 adaptive_quad_top_fraction=None, f_quad_adapt=1000, adaptive_quad_max_points=65536):
+                 adaptive_quad_top_fraction=None, f_quad_adapt=1000, adaptive_quad_max_points=65536,
+                 adaptive_quad_indicator='quad', adapt_start=None):
         self.input_dim = input_dim
         
         self.seq_train = seq_train  # Sequential training flag
@@ -217,6 +219,8 @@ class MinMaxOptProb2D:
         self.adaptive_quad_top_fraction = adaptive_quad_top_fraction
         self.f_quad_adapt = max(1, int(f_quad_adapt))
         self.adaptive_quad_max_points = adaptive_quad_max_points
+        self.adaptive_quad_indicator = adaptive_quad_indicator.lower()
+        self.adapt_start = adapt_start
         self.adaptive_quadrature_active = False
 
         if not self.seq_train and self.set_wandb:
@@ -242,7 +246,9 @@ class MinMaxOptProb2D:
                            "use_adaptive_quadrature": self.use_adaptive_quadrature,
                            "adaptive_quad_top_fraction": adaptive_quad_top_fraction,
                            "f_quad_adapt": self.f_quad_adapt,
-                           "adaptive_quad_max_points": adaptive_quad_max_points
+                           "adaptive_quad_max_points": adaptive_quad_max_points,
+                           "adaptive_quad_indicator": self.adaptive_quad_indicator,
+                           "adapt_start": self.adapt_start,
                        })
         self.gen_funcs(grade_idx=0)  # Generate functions for the first grade
         print(f"Partition type: {self.partition}, dg_type: {self.dg_type}, p_dof: {self.p_dof}")
@@ -266,7 +272,7 @@ class MinMaxOptProb2D:
         return weights[element_indices]
 
     def using_adaptive_quadrature(self):
-        return self.use_adaptive_quadrature and hasattr(self.pwp, "update_adaptive_quadrature_by_oscillation")
+        return self.use_adaptive_quadrature and hasattr(self.pwp, "update_adaptive_quadrature_by_indicator")
 
     def adaptive_quadrature_is_active(self):
         return self.using_adaptive_quadrature() and self.adaptive_quadrature_active
@@ -277,23 +283,51 @@ class MinMaxOptProb2D:
     def update_adaptive_quadrature(self, params):
         if not self.using_adaptive_quadrature():
             return None, None
-        eta_osc, level1_indices = self.pwp.update_adaptive_quadrature_by_oscillation(
-            u_eval=self.u_eval,
-            params=params,
-            top_fraction=self.adaptive_quad_top_fraction,
-            max_points=self.adaptive_quad_max_points,
-        )
+        indicator = self.adaptive_quad_indicator.lower()
+        if indicator in ('osc', 'oscillation'):
+            eta_osc = compute_oscillation_indicator(
+                pwp=self.pwp,
+                u_eval=self.u_eval,
+                params=params,
+                max_points=self.adaptive_quad_max_points,
+            )
+            eta, level1_indices = self.pwp.update_adaptive_quadrature_by_indicator(
+                eta_osc,
+                top_fraction=self.adaptive_quad_top_fraction,
+                indicator_name='osc',
+            )
+        elif indicator in ('quad', 'quad_diff', 'quadrature_difference'):
+            eta_quad = compute_quadrature_difference_indicator(
+                pwp=self.pwp,
+                params=params,
+                loss_fn_elem_int_per_elem_quad_vmap=self.vmap_loss_fn_elem_int_per_elem_quad,
+                max_points=self.adaptive_quad_max_points,
+            )
+            eta, level1_indices = self.pwp.update_adaptive_quadrature_by_indicator(
+                eta_quad,
+                top_fraction=self.adaptive_quad_top_fraction,
+                indicator_name='quad',
+            )
+        else:
+            raise ValueError("adaptive_quad_indicator must be 'osc', 'quad', or 'quad_diff'.")
         self.set_loss_fn_elem_int_per_elem_adaptive()
         self.adaptive_quadrature_active = True
         self.set_maximize_kh_fn()
-        return eta_osc, level1_indices
+        return eta, level1_indices
 
     def should_update_adaptive_quadrature(self, iter, grade_epoch):
         if not self.using_adaptive_quadrature():
             return False
-        adapt_start = int(np.ceil(0.05 * grade_epoch))
-        adapt_start = 1
+        adapt_start = self.resolve_adapt_start(grade_epoch)
         return iter >= adapt_start and (iter - adapt_start) % self.f_quad_adapt == 0
+
+    def resolve_adapt_start(self, grade_epoch):
+        if self.adapt_start is None:
+            return int(np.ceil(0.25 * grade_epoch))
+        adapt_start = float(self.adapt_start)
+        if 0.0 < adapt_start < 1.0:
+            return int(np.ceil(adapt_start * grade_epoch))
+        return int(np.ceil(adapt_start))
 
     def gen_ibc(self):
         if self.input_dim == 2:
@@ -384,8 +418,7 @@ class MinMaxOptProb2D:
             loss_all_test, loss_l1_all = self.vmap_loss_fn_elem_int_per_elem(jnp.arange(Nt), perturbed_coeffs_all, params)
         best_indices = jnp.argmax(loss_all_test, axis=1)
         loss_each_elem = loss_all_test[jnp.arange(Nt), best_indices]
-        loss_each_elem = self.element_loss_weights() * loss_each_elem
-        loss_eqn = jnp.sum(loss_each_elem)
+        loss_eqn = jnp.sum(self.element_loss_weights() * loss_each_elem)
         # Compute absolute loss, which is the L1 norm of the residual. Just for comparison and debugging. We do not use it in the optimization.
         loss_l1 = jnp.sum(loss_l1_all)
         best_coeffs_all = perturbed_coeffs_all[jnp.arange(Nt), best_indices]
@@ -493,11 +526,9 @@ class MinMaxOptProb2D:
                                                                                     level1_quad_points,
                                                                                     level1_quad_weights,
                                                                                     )
-
         def loss_fn_elem_int_per_elem_adaptive(params, p_coeffs_all):
             loss_all = jnp.zeros(p_coeffs_all.shape[:2])
             loss_l1_all = jnp.zeros(Nt)
-
             if loss_fn_elem_int_per_elem_level0 is not None:                
                 loss_level, loss_l1_level = loss_fn_elem_int_per_elem_level0(
                     local_indices0,
@@ -515,7 +546,6 @@ class MinMaxOptProb2D:
                 )
                 loss_all = loss_all.at[level1_indices].set(loss_level)
                 loss_l1_all = loss_l1_all.at[level1_indices].set(loss_l1_level)
-
             return loss_all, loss_l1_all
         self.loss_fn_elem_int_per_elem_adaptive = loss_fn_elem_int_per_elem_adaptive
     

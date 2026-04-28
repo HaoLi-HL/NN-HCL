@@ -36,6 +36,12 @@ def build_args():
     parser.add_argument("--stage2-k", type=int, default=0)
     parser.add_argument("--stage2-epochs", type=int, default=0)
     parser.add_argument("--adaptive-quad-top-fraction", type=float, default=None)
+    parser.add_argument("--adapt-start", type=float, default=None)
+    parser.add_argument(
+        "--adaptive-quad-indicator",
+        choices=("osc", "quad", "quad_diff"),
+        default="quad",
+    )
     parser.add_argument("--disable-adaptive-quadrature", action="store_true")
     parser.add_argument("--importance-sampling", action="store_true")
     parser.add_argument("--plot", action="store_true")
@@ -96,6 +102,8 @@ def make_problem(args):
         use_importance_sampling=args.importance_sampling,
         use_adaptive_quadrature=not args.disable_adaptive_quadrature,
         adaptive_quad_top_fraction=args.adaptive_quad_top_fraction,
+        adaptive_quad_indicator=args.adaptive_quad_indicator,
+        adapt_start=args.adapt_start,
     )
 
 
@@ -114,6 +122,8 @@ def assert_smoke_result(seq):
     print(f"final equation loss: {float(final_loss):.6e}")
     print(f"adaptive_quad_top_fraction stored on seq: {seq.adaptive_quad_top_fraction}")
     print(f"adaptive_quad_top_fraction stored on segment: {segment.adaptive_quad_top_fraction}")
+    print(f"adapt_start stored on seq: {seq.adapt_start}")
+    print(f"adapt_start stored on segment: {segment.adapt_start}")
     print(f"using_adaptive_quadrature: {segment.using_adaptive_quadrature()}")
 
     if segment.using_adaptive_quadrature():

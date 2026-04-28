@@ -25,7 +25,8 @@ class SeqMinMaxOptProb:
                  flux=None, res=None, bc_type='Dirichlet', loss_type='interior',  k=0, use_a=True, f_plot=1000, plt_err_dist=False, plt_mesh=False,
                  partition='tri', dg_type='P1', use_importance_sampling=False, u_ref=None, pre_epochs=1000, pre_train='',
                  M_t=1000, M_x=2000, set_wandb=False, use_adaptive_quadrature=True,
-                 adaptive_quad_top_fraction=None, f_quad_adapt=1000, adaptive_quad_max_points=65536):
+                 adaptive_quad_top_fraction=None, f_quad_adapt=1000, adaptive_quad_max_points=65536,
+                 adaptive_quad_indicator='quad', adapt_start=None):
         """
         Initialize the sequential training class.
 
@@ -121,6 +122,8 @@ class SeqMinMaxOptProb:
         self.adaptive_quad_top_fraction = adaptive_quad_top_fraction
         self.f_quad_adapt = max(1, int(f_quad_adapt))
         self.adaptive_quad_max_points = adaptive_quad_max_points
+        self.adaptive_quad_indicator = adaptive_quad_indicator.lower()
+        self.adapt_start = adapt_start
 
         if self.set_wandb:
             wandb.init(project=self.project, 
@@ -151,6 +154,8 @@ class SeqMinMaxOptProb:
                                "adaptive_quad_top_fraction": adaptive_quad_top_fraction,
                                "f_quad_adapt": self.f_quad_adapt,
                                "adaptive_quad_max_points": adaptive_quad_max_points,
+                               "adaptive_quad_indicator": self.adaptive_quad_indicator,
+                               "adapt_start": self.adapt_start,
                               })
 
     def train_seq(self, sqgment_start=0, sqgment_end=None, grade_epochs=None, epoch_stage2=None, save_model=True):
@@ -203,6 +208,8 @@ class SeqMinMaxOptProb:
                 adaptive_quad_top_fraction=self.adaptive_quad_top_fraction,
                 f_quad_adapt=self.f_quad_adapt,
                 adaptive_quad_max_points=self.adaptive_quad_max_points,
+                adaptive_quad_indicator=self.adaptive_quad_indicator,
+                adapt_start=self.adapt_start,
             )
              # Store the segment and update previous_params with the trained parameters
             self.segments.append(segment)
@@ -299,6 +306,8 @@ def save_seq_model(seq_obj, model_path_prefix):
             'adaptive_quad_top_fraction': seq_obj.adaptive_quad_top_fraction,
             'f_quad_adapt': seq_obj.f_quad_adapt,
             'adaptive_quad_max_points': seq_obj.adaptive_quad_max_points,
+            'adaptive_quad_indicator': seq_obj.adaptive_quad_indicator,
+            'adapt_start': seq_obj.adapt_start,
         }
     }
     model_path = f"{model_path_prefix}.pkl"

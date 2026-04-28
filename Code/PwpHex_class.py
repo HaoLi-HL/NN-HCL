@@ -50,6 +50,7 @@ class PiecewiseLinearPolynomialsHex:
             self.ref_quad_weights_by_level.append(ref_weights)
         self.quad_levels = jnp.zeros(self.N_elements, dtype=jnp.int32)
         self.eta_osc = jnp.zeros(self.N_elements)
+        self.eta_quad = jnp.zeros(self.N_elements)
         self.element_loss_weights = jnp.ones(self.N_elements)
         self.level0_element_indices = jnp.arange(self.N_elements)
         self.level1_element_indices = jnp.array([], dtype=jnp.int32)
@@ -198,6 +199,7 @@ class PiecewiseLinearPolynomialsHex:
     def reset_adaptive_quadrature(self):
         self.quad_levels = jnp.zeros(self.N_elements, dtype=jnp.int32)
         self.eta_osc = jnp.zeros(self.N_elements)
+        self.eta_quad = jnp.zeros(self.N_elements)
         self.element_loss_weights = jnp.ones(self.N_elements)
         self.level0_element_indices = jnp.arange(self.N_elements)
         self.level1_element_indices = jnp.array([], dtype=jnp.int32)
@@ -205,19 +207,13 @@ class PiecewiseLinearPolynomialsHex:
         self.quad_weights_parti_level1 = jnp.zeros((0, self.Nq_by_level[1]), dtype=self.quad_weights_parti.dtype)
         self.level1_cache_positions = -jnp.ones(self.N_elements, dtype=jnp.int32)
 
-    def compute_oscillation_indicator(self, u_values_parti):
-        return jnp.max(u_values_parti, axis=1) - jnp.min(u_values_parti, axis=1)
-
-    def update_adaptive_quadrature_by_oscillation(self, u_eval, params, top_fraction=None, top_count=None, max_points=65536):
+    def update_adaptive_quadrature_by_indicator(self, indicator, top_fraction=None, top_count=None, indicator_name=None):
         """
-        Select level-1 elements using eta_osc[e] = max_q u_theta - min_q u_theta.
+        Select level-1 elements from a scalar elementwise indicator.
 
-        The indicator is evaluated on level-1 quadrature points in chunks. This
-        avoids materializing all level-1 points for the whole mesh at once.
-        Selected elements get quadrature level 1 and double element loss
-        weight; all others remain level 0 with unit element loss weight. The
-        quadrature weights for both levels still integrate over the same
-        physical element volume.
+        The selected elements get level-1 quadrature and double element loss
+        weight. Level-1 physical quadrature is cached only for selected
+        elements.
         """
         if top_count is None:
             if top_fraction is None:
@@ -225,21 +221,11 @@ class PiecewiseLinearPolynomialsHex:
             top_count = int(np.ceil(float(top_fraction) * self.N_elements))
         top_count = max(0, min(self.N_elements, int(top_count)))
 
-        Nq_level1 = self.Nq_by_level[1]
-        chunk_size = max(1, int(max_points) // Nq_level1)
-        eta_chunks = []
-        for start in range(0, self.N_elements, chunk_size):
-            stop = min(start + chunk_size, self.N_elements)
-            element_indices = jnp.arange(start, stop, dtype=jnp.int32)
-            _, quad_points, _ = self.get_quadrature_by_level(1, element_indices)
-            u_values = u_eval(params, quad_points.reshape(-1, 3)).reshape(stop - start, Nq_level1)
-            eta_chunks.append(self.compute_oscillation_indicator(u_values))
-        eta_osc = jnp.concatenate(eta_chunks, axis=0)
-
+        indicator = jnp.asarray(indicator).reshape((self.N_elements,))
         if top_count == 0:
             level1_element_indices = jnp.array([], dtype=jnp.int32)
         else:
-            _, level1_element_indices = lax.top_k(eta_osc, top_count)
+            _, level1_element_indices = lax.top_k(indicator, top_count)
 
         quad_levels = jnp.zeros(self.N_elements, dtype=jnp.int32)
         quad_levels = quad_levels.at[level1_element_indices].set(1)
@@ -255,14 +241,17 @@ class PiecewiseLinearPolynomialsHex:
         level1_cache_positions = level1_cache_positions.at[level1_element_indices].set(jnp.arange(top_count, dtype=jnp.int32))
 
         self.quad_levels = quad_levels
-        self.eta_osc = eta_osc
+        if indicator_name == 'quad':
+            self.eta_quad = indicator
+        else:
+            self.eta_osc = indicator
         self.element_loss_weights = element_loss_weights
         self.level0_element_indices = level0_element_indices
         self.level1_element_indices = level1_element_indices
         self.quad_points_parti_level1 = quad_points_parti_level1
         self.quad_weights_parti_level1 = quad_weights_parti_level1
         self.level1_cache_positions = level1_cache_positions
-        return eta_osc, level1_element_indices
+        return indicator, level1_element_indices
 
     def _pad_level0_quadrature_subset(self, element_indices):
         points0 = self.quad_points_parti[element_indices]
