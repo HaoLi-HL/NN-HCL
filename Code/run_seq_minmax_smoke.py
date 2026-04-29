@@ -41,7 +41,7 @@ def build_args():
     parser.add_argument("--adapt-start", type=float, default=None)
     parser.add_argument(
         "--adaptive-quad-indicator",
-        choices=("osc", "quad", "quad_diff"),
+        choices=("osc", "grad", "gradient", "quad", "quad_diff"),
         default="quad",
     )
     parser.add_argument("--disable-adaptive-quadrature", action="store_true")

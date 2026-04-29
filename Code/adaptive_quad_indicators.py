@@ -23,6 +23,30 @@ def compute_oscillation_indicator(pwp, u_eval, params, max_points=65536):
     return jnp.concatenate(eta_chunks, axis=0)
 
 
+def compute_gradient_indicator(pwp, grad_eval, params, max_points=65536):
+    """
+    Compute eta_grad[e] = h_x * max_q |grad u_theta| on level-1 quadrature.
+
+    The gradient norm is the Euclidean norm over the input coordinates. For
+    input_dim=3 this is sqrt(u_t^2 + u_x^2 + u_y^2). The scan is chunked by
+    physical quadrature-point count to limit peak memory.
+    """
+    Nq_level1 = pwp.Nq_by_level[1]
+    input_dim = pwp.partitions.shape[-1]
+    chunk_size = max(1, int(max_points) // Nq_level1)
+    eta_chunks = []
+
+    for start in range(0, pwp.N_elements, chunk_size):
+        stop = min(start + chunk_size, pwp.N_elements)
+        element_indices = jnp.arange(start, stop, dtype=jnp.int32)
+        _, quad_points, _ = pwp.get_quadrature_by_level(1, element_indices)
+        grad_values = grad_eval(params, quad_points.reshape(-1, input_dim))
+        grad_norms = jnp.linalg.norm(grad_values, axis=1).reshape(stop - start, Nq_level1)
+        eta_chunks.append(pwp.hx * jnp.max(grad_norms, axis=1))
+
+    return jnp.concatenate(eta_chunks, axis=0)
+
+
 def compute_quadrature_difference_indicator(
     pwp,
     params,

@@ -51,6 +51,7 @@ class PiecewiseLinearPolynomialsHex:
         self.quad_levels = jnp.zeros(self.N_elements, dtype=jnp.int32)
         self.eta_osc = jnp.zeros(self.N_elements)
         self.eta_quad = jnp.zeros(self.N_elements)
+        self.eta_grad = jnp.zeros(self.N_elements)
         self.element_loss_weights = jnp.ones(self.N_elements)
         self.level0_element_indices = jnp.arange(self.N_elements)
         self.level1_element_indices = jnp.array([], dtype=jnp.int32)
@@ -200,6 +201,7 @@ class PiecewiseLinearPolynomialsHex:
         self.quad_levels = jnp.zeros(self.N_elements, dtype=jnp.int32)
         self.eta_osc = jnp.zeros(self.N_elements)
         self.eta_quad = jnp.zeros(self.N_elements)
+        self.eta_grad = jnp.zeros(self.N_elements)
         self.element_loss_weights = jnp.ones(self.N_elements)
         self.level0_element_indices = jnp.arange(self.N_elements)
         self.level1_element_indices = jnp.array([], dtype=jnp.int32)
@@ -243,6 +245,8 @@ class PiecewiseLinearPolynomialsHex:
         self.quad_levels = quad_levels
         if indicator_name == 'quad':
             self.eta_quad = indicator
+        elif indicator_name == 'grad':
+            self.eta_grad = indicator
         else:
             self.eta_osc = indicator
         self.element_loss_weights = element_loss_weights

@@ -19,7 +19,7 @@ from PwpTri_class import PiecewiseLinearPolynomialsTri
 from PwpRect_class import PiecewiseLinearPolynomialsRect
 from PwpHex_class import PiecewiseLinearPolynomialsHex
 from PwpTetra_class import PiecewiseLinearPolynomialsTetra
-from adaptive_quad_indicators import compute_oscillation_indicator, compute_quadrature_difference_indicator
+from adaptive_quad_indicators import compute_oscillation_indicator, compute_gradient_indicator, compute_quadrature_difference_indicator
 import wandb
 from functools import partial
 
@@ -303,6 +303,19 @@ class MinMaxOptProb2D:
                 top_count=self.adaptive_quad_top_count,
                 indicator_name='osc',
             )
+        elif indicator in ('grad', 'gradient', 'gradient_norm'):
+            eta_grad = compute_gradient_indicator(
+                pwp=self.pwp,
+                grad_eval=self.grad_u,
+                params=params,
+                max_points=self.adaptive_quad_max_points,
+            )
+            eta, level1_indices = self.pwp.update_adaptive_quadrature_by_indicator(
+                eta_grad,
+                top_fraction=self.adaptive_quad_top_fraction,
+                top_count=self.adaptive_quad_top_count,
+                indicator_name='grad',
+            )
         elif indicator in ('quad', 'quad_diff', 'quadrature_difference'):
             eta_quad = compute_quadrature_difference_indicator(
                 pwp=self.pwp,
@@ -317,7 +330,7 @@ class MinMaxOptProb2D:
                 indicator_name='quad',
             )
         else:
-            raise ValueError("adaptive_quad_indicator must be 'osc', 'quad', or 'quad_diff'.")
+            raise ValueError("adaptive_quad_indicator must be 'osc', 'grad', 'quad', or 'quad_diff'.")
         self.set_loss_fn_elem_int_per_elem_adaptive()
         self.adaptive_quadrature_active = True
         self.set_maximize_kh_fn()
