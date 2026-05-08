@@ -24,9 +24,9 @@ class SeqMinMaxOptProb:
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  flux=None, res=None, bc_type='Dirichlet', loss_type='interior',  k=0, use_a=True, f_plot=1000, plt_err_dist=False, plt_mesh=False,
                  partition='tri', dg_type='P1', use_importance_sampling=False, u_ref=None, pre_epochs=1000, pre_train='',
-                 M_t=1000, M_x=2000, set_wandb=False, use_adaptive_quadrature=True,
+                 M_t=1000, M_x=2000, set_wandb=False, use_adaptive_quadrature=False,
                  adaptive_quad_top_fraction=None, adaptive_quad_top_count=None, f_quad_adapt=1000, adaptive_quad_max_points=65536,
-                 adaptive_quad_indicator='quad', adapt_start=None, kh_batch_size=10000):
+                 adaptive_quad_indicator='grad', adapt_start=None, kh_batch_size=10000):
         """
         Initialize the sequential training class.
 
@@ -119,7 +119,7 @@ class SeqMinMaxOptProb:
         self.u_ref = u_ref
         self.pre_epochs = pre_epochs
         self.pre_train = pre_train  # 'ic' or 'u_ref' or ''
-        self.use_adaptive_quadrature = use_adaptive_quadrature
+        self.adaptive_quadrature_requested = bool(use_adaptive_quadrature)
         self.adaptive_quad_top_fraction = adaptive_quad_top_fraction
         self.adaptive_quad_top_count = adaptive_quad_top_count
         self.f_quad_adapt = max(1, int(f_quad_adapt))
@@ -153,7 +153,7 @@ class SeqMinMaxOptProb:
                                "adjust_gamma": adjust_gamma,
                                "L1reg": L1reg,
                                "sampling_method": sampling_method,
-                               "use_adaptive_quadrature": use_adaptive_quadrature,
+                               "use_adaptive_quadrature": self.adaptive_quadrature_requested,
                                "adaptive_quad_top_fraction": adaptive_quad_top_fraction,
                                "adaptive_quad_top_count": adaptive_quad_top_count,
                                "f_quad_adapt": self.f_quad_adapt,
@@ -209,7 +209,7 @@ class SeqMinMaxOptProb:
                 use_importance_sampling=self.use_importance_sampling, 
                 u_ref=self.u_ref, pre_epochs=self.pre_epochs, pre_train=self.pre_train,
                 M_t=self.M_t, M_x=self.M_x, seq_train=True, set_wandb=self.set_wandb,
-                use_adaptive_quadrature=self.use_adaptive_quadrature,
+                use_adaptive_quadrature=self.adaptive_quadrature_requested,
                 adaptive_quad_top_fraction=self.adaptive_quad_top_fraction,
                 adaptive_quad_top_count=self.adaptive_quad_top_count,
                 f_quad_adapt=self.f_quad_adapt,
@@ -309,7 +309,7 @@ def save_seq_model(seq_obj, model_path_prefix):
             'L1reg': seq_obj.L1reg,
             'sampling_method': seq_obj.sampling_method,
             'set_wandb': seq_obj.set_wandb,
-            'use_adaptive_quadrature': seq_obj.use_adaptive_quadrature,
+            'use_adaptive_quadrature': seq_obj.adaptive_quadrature_requested,
             'adaptive_quad_top_fraction': seq_obj.adaptive_quad_top_fraction,
             'adaptive_quad_top_count': seq_obj.adaptive_quad_top_count,
             'f_quad_adapt': seq_obj.f_quad_adapt,

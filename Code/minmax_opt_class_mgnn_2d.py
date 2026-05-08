@@ -37,9 +37,9 @@ class MinMaxOptProb2D:
                  init_lrs=[1e-3, 1e-3, 1e-3], grade_epochs=[10, 10, 10], decay_rates=[1e-3, 1e-3, 1e-3], init_lr_stage2=1e-3, epoch_stage2=100, decay_rate_stage2=1e-3,
                  flux=None, res=None, bc_type='Dirichlet', loss_type='interior', k=0, use_a=True, M_t = 1000, M_x = 1000, f_plot=1000, plt_err_dist=False, plt_mesh=False,
                  partition='tri', p_dof=None, dg_type='P1', use_importance_sampling=False, u_ref=None, pre_epochs=1000, pre_train='',
-                 seq_train=False, set_wandb=False, use_adaptive_quadrature=True,
+                 seq_train=False, set_wandb=False, use_adaptive_quadrature=False,
                  adaptive_quad_top_fraction=None, adaptive_quad_top_count=None, f_quad_adapt=1000, adaptive_quad_max_points=65536,
-                 adaptive_quad_indicator='quad', adapt_start=None, kh_batch_size=10000):
+                 adaptive_quad_indicator='grad', adapt_start=None, kh_batch_size=10000):
         self.input_dim = input_dim
         
         self.seq_train = seq_train  # Sequential training flag
@@ -212,11 +212,19 @@ class MinMaxOptProb2D:
         self.u_ref = u_ref  # Reference solution for error calculation, if provided
         self.pre_epochs = pre_epochs
         self.pre_train = pre_train  # 'ic' or 'u_ref' or ''
-        self.use_adaptive_quadrature = (
-            use_adaptive_quadrature
-            and self.input_dim == 3
-            and self.partition == 'hex'
+        self.adaptive_quadrature_requested = bool(use_adaptive_quadrature)
+        adaptive_partition_supported = (
+            (self.input_dim == 2 and self.partition == 'tri')
+            or (self.input_dim == 3 and self.partition == 'hex')
+        )
+        self.adaptive_quadrature_supported = (
+            adaptive_partition_supported
             and self.loss_type == 'interior'
+            and hasattr(self.pwp, "update_adaptive_quadrature_by_indicator")
+        )
+        self.adaptive_quadrature_enabled = (
+            self.adaptive_quadrature_requested
+            and self.adaptive_quadrature_supported
         )
         self.adaptive_quad_top_fraction = adaptive_quad_top_fraction
         self.adaptive_quad_top_count = adaptive_quad_top_count
@@ -248,7 +256,9 @@ class MinMaxOptProb2D:
                            "grad_clip_norm": self.grad_clip_norm,
                            "sigma": sigma,
                            "L1reg": L1reg,
-                           "use_adaptive_quadrature": self.use_adaptive_quadrature,
+                           "use_adaptive_quadrature": self.adaptive_quadrature_requested,
+                           "adaptive_quadrature_supported": self.adaptive_quadrature_supported,
+                           "adaptive_quadrature_enabled": self.adaptive_quadrature_enabled,
                            "adaptive_quad_top_fraction": adaptive_quad_top_fraction,
                            "adaptive_quad_top_count": adaptive_quad_top_count,
                            "f_quad_adapt": self.f_quad_adapt,
@@ -277,17 +287,14 @@ class MinMaxOptProb2D:
             return weights
         return weights[element_indices]
 
-    def using_adaptive_quadrature(self):
-        return self.use_adaptive_quadrature and hasattr(self.pwp, "update_adaptive_quadrature_by_indicator")
-
     def adaptive_quadrature_is_active(self):
-        return self.using_adaptive_quadrature() and self.adaptive_quadrature_active
+        return self.adaptive_quadrature_enabled and self.adaptive_quadrature_active
 
     def set_maximize_kh_fn(self):
         self.maximize_kh = jit(self.maximize_kh_step)
 
     def update_adaptive_quadrature(self, params):
-        if not self.using_adaptive_quadrature():
+        if not self.adaptive_quadrature_enabled:
             return None, None
         indicator = self.adaptive_quad_indicator.lower()
         if indicator in ('osc', 'oscillation'):
@@ -337,7 +344,7 @@ class MinMaxOptProb2D:
         return eta, level1_indices
 
     def should_update_adaptive_quadrature(self, iter, grade_epoch):
-        if not self.using_adaptive_quadrature():
+        if not self.adaptive_quadrature_enabled:
             return False
         adapt_start = self.resolve_adapt_start(grade_epoch)
         return iter >= adapt_start and (iter - adapt_start) % self.f_quad_adapt == 0
@@ -410,7 +417,7 @@ class MinMaxOptProb2D:
             self.space_time_flux = jit(vmap(lambda u: jnp.array([u, self.flux(u)[0], self.flux(u)[1]])))
         self.vmap_loss_fn_elem_int_per_elem = jit(vmap(self.loss_fn_elem_int_per_elem, in_axes=(0, 0, None)))
         self.vmap_loss_fn_elem_int_per_elem_quad = jit(vmap(self.loss_fn_elem_int_per_elem_quad, in_axes=(0, 0, None, 0, 0)))
-        if self.using_adaptive_quadrature():
+        if self.adaptive_quadrature_enabled:
             self.set_loss_fn_elem_int_per_elem_adaptive()
         else:
             self.loss_fn_elem_int_per_elem_adaptive = None
@@ -1078,7 +1085,7 @@ class MinMaxOptProb2D:
 
             self.gen_funcs(grade_idx)
             self.adaptive_quadrature_active = False
-            if self.using_adaptive_quadrature():
+            if self.adaptive_quadrature_enabled:
                 self.pwp.reset_adaptive_quadrature()
             self.set_maximize_kh_fn()
             if self.loss_type not in ['pinn', 'cai']:
@@ -1190,10 +1197,10 @@ class MinMaxOptProb2D:
             print(f"\nStage 2: Refining Last {self.k} Grades")
             self.gen_funcs()
             self.adaptive_quadrature_active = False
-            if self.using_adaptive_quadrature():
+            if self.adaptive_quadrature_enabled:
                 self.pwp.reset_adaptive_quadrature()
             self.set_maximize_kh_fn()
-            loss_eqn_fn = self.loss_fn_eqn if self.using_adaptive_quadrature() else jit(self.loss_fn_eqn)
+            loss_eqn_fn = self.loss_fn_eqn if self.adaptive_quadrature_enabled else jit(self.loss_fn_eqn)
             loss_data_fn = jit(self.loss_fn_ibc)
             params_last_k = [mlp.params for mlp in self.model.mlps[-self.k:]]
             self.opt_state_stage2 = self.optimizer_stage2.init(params_last_k)
@@ -1303,7 +1310,7 @@ class MinMaxOptProb2D:
             loss_history_eqn = []
             if self.loss_type not in ['pinn', 'cai']:
                 self.adaptive_quadrature_active = False
-                if self.using_adaptive_quadrature():
+                if self.adaptive_quadrature_enabled:
                     self.pwp.reset_adaptive_quadrature()
                 self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh(current_params, self.key)
             for iter in range(self.N_test_gamma):
@@ -1399,7 +1406,7 @@ class MinMaxOptProb2D:
         self.opt_state_list = [opt.init(mlp.params) for opt, mlp in zip(self.optimizer_list, self.model.mlps)]
         self.gen_funcs(loaded_total_grade-1)
         self.adaptive_quadrature_active = False
-        if self.using_adaptive_quadrature():
+        if self.adaptive_quadrature_enabled:
             self.pwp.reset_adaptive_quadrature()
         self.pwp.coeffs, self.key, loss_eqn_from_kh, loss_l1, loss_each_elem = self.maximize_kh_step(loaded_params[-1], self.key)
         loss_eqn = self.loss_fn_eqn(loaded_params[-1])

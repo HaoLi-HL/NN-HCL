@@ -42,8 +42,9 @@ def build_args():
     parser.add_argument(
         "--adaptive-quad-indicator",
         choices=("osc", "grad", "gradient", "quad", "quad_diff"),
-        default="quad",
+        default="grad",
     )
+    parser.add_argument("--enable-adaptive-quadrature", action="store_true")
     parser.add_argument("--disable-adaptive-quadrature", action="store_true")
     parser.add_argument("--importance-sampling", action="store_true")
     parser.add_argument("--plot", action="store_true")
@@ -103,7 +104,7 @@ def make_problem(args):
         M_x=4,
         set_wandb=False,
         use_importance_sampling=args.importance_sampling,
-        use_adaptive_quadrature=not args.disable_adaptive_quadrature,
+        use_adaptive_quadrature=args.enable_adaptive_quadrature and not args.disable_adaptive_quadrature,
         adaptive_quad_top_fraction=args.adaptive_quad_top_fraction,
         adaptive_quad_top_count=args.adaptive_quad_top_count,
         adaptive_quad_indicator=args.adaptive_quad_indicator,
@@ -132,9 +133,12 @@ def assert_smoke_result(seq):
     print(f"kh_batch_size stored on segment: {segment.kh_batch_size}")
     print(f"adapt_start stored on seq: {seq.adapt_start}")
     print(f"adapt_start stored on segment: {segment.adapt_start}")
-    print(f"using_adaptive_quadrature: {segment.using_adaptive_quadrature()}")
+    print(f"adaptive_quadrature_requested on seq: {seq.adaptive_quadrature_requested}")
+    print(f"adaptive_quadrature_requested on segment: {segment.adaptive_quadrature_requested}")
+    print(f"adaptive_quadrature_supported: {segment.adaptive_quadrature_supported}")
+    print(f"adaptive_quadrature_enabled: {segment.adaptive_quadrature_enabled}")
 
-    if segment.using_adaptive_quadrature():
+    if segment.adaptive_quadrature_enabled:
         if segment.adaptive_quad_top_count is None:
             fraction = segment.adaptive_quad_top_fraction
             if fraction is None:
