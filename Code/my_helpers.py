@@ -745,14 +745,22 @@ def plot_comparison_seperate_combined_u_theta(seq_model, u_ref=None, file_path='
         print("No timestamps provided. Nothing to plot.")
         return
 
+    if M_x <= 0:
+        raise ValueError("M_x must be a positive integer.")
+
+    x = np.linspace(x_min, x_max, M_x)
+
     # Load numerical solution data or use reference function
     if u_ref is None:
         data = np.load(file_path)
         times = data['times']
-        x = data['x']
-        u_num = data['u']  # Shape: (n_times, n_x)
+        x_data = data['x']
+        u_data = data['u']  # Shape: (n_times, n_x)
+        if x_data[0] > x_data[-1]:
+            x_data = x_data[::-1]
+            u_data = u_data[:, ::-1]
+        u_num = np.array([np.interp(x, x_data, u_t) for u_t in u_data])
     else:
-        x = np.linspace(seq_model.x_min, seq_model.x_max, M_x)
         times = np.array(ts)
         u_num = np.array([u_ref(t, x) for t in times])  # Shape: (len(ts), n_x)
 
@@ -793,6 +801,7 @@ def plot_comparison_seperate_combined_u_theta(seq_model, u_ref=None, file_path='
         ax.legend()
         ax.set_xlabel('x')
         ax.set_ylabel('u')
+        ax.set_xlim(x_min, x_max)
         ax.set_title(f'Solutions at t = {t_val:.2f}')
 
         plt.tight_layout()
