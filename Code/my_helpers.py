@@ -724,7 +724,23 @@ def plot_comparison_seperate(model, u_ref=None, file_path='data/burgers_sin_ref.
     plt.tight_layout()
     plt.show()
 
-def plot_comparison_seperate_combined_u_theta(seq_model, u_ref=None, file_path='data/burgers_sin_ref.npz', ts=None, x_min=-1.0, x_max=1.0, M_x=601, save_eps=False, tol=1e-6):
+def plot_comparison_seperate_combined_u_theta(
+    seq_model,
+    u_ref=None,
+    file_path='data/burgers_sin_ref.npz',
+    ts=None,
+    x_min=-1.0,
+    x_max=1.0,
+    M_x=601,
+    save_eps=False,
+    tol=1e-6,
+    zoom_in=False,
+    zoom_x_range=None,
+    zoom_y_range=None,
+    zoom_inset_position=(0.55, 0.12, 0.40, 0.40),
+    zoom_padding=0.1,
+    zoom_hide_ticks=True,
+):
     """
     Plot both the neural network solution and the reference solution for each timestamp in ts,
     with both solutions overlaid on the same axes in subplots (one subplot per timestamp).
@@ -738,6 +754,14 @@ def plot_comparison_seperate_combined_u_theta(seq_model, u_ref=None, file_path='
         x_max: Maximum x value (default: 1.0).
         M_x: Number of x grid points (default: 601).
         save_eps: Whether to save each figure as .eps file (default: False).
+        zoom_in: Whether to add a zoomed inset plot (default: False).
+        zoom_x_range: Tuple (x1, x2) specifying the x range to zoom in.
+        zoom_y_range: Optional tuple (y1, y2) specifying the y range in the inset.
+            If None, this range is computed from both plotted curves in zoom_x_range.
+        zoom_inset_position: Inset axes position [left, bottom, width, height],
+            relative to the main axes (default: (0.55, 0.12, 0.40, 0.40)).
+        zoom_padding: Fractional y-padding used when zoom_y_range is None.
+        zoom_hide_ticks: Whether to hide tick labels in the inset (default: True).
     """
     if ts is None:
         ts = []
@@ -747,6 +771,10 @@ def plot_comparison_seperate_combined_u_theta(seq_model, u_ref=None, file_path='
 
     if M_x <= 0:
         raise ValueError("M_x must be a positive integer.")
+    if zoom_in and zoom_x_range is None:
+        raise ValueError("zoom_x_range must be provided when zoom_in=True.")
+    if zoom_padding < 0:
+        raise ValueError("zoom_padding must be non-negative.")
 
     x = np.linspace(x_min, x_max, M_x)
 
@@ -796,8 +824,42 @@ def plot_comparison_seperate_combined_u_theta(seq_model, u_ref=None, file_path='
         u_nn_t = np.asarray(u_nn_values).squeeze()  # Shape: (n_x,)
 
         # Plot both on the same axes
-        ax.plot(x, u_ref_t, label='Ref. sol.', linestyle='--', linewidth=2)
-        ax.plot(x, u_nn_t, label='NN sol.', linewidth=2)
+        ref_line, = ax.plot(x, u_ref_t, label='Ref. sol.', linestyle='--', linewidth=2)
+        nn_line, = ax.plot(x, u_nn_t, label='NN sol.', linewidth=2)
+
+        if zoom_in:
+            zoom_x1, zoom_x2 = zoom_x_range
+            zoom_x_low = min(zoom_x1, zoom_x2)
+            zoom_x_high = max(zoom_x1, zoom_x2)
+            zoom_mask = (x >= zoom_x_low) & (x <= zoom_x_high)
+            if not np.any(zoom_mask):
+                raise ValueError("zoom_x_range does not contain any plotted x points. Increase M_x or adjust zoom_x_range.")
+
+            if zoom_y_range is None:
+                zoom_values = np.concatenate([np.ravel(u_ref_t[zoom_mask]), np.ravel(u_nn_t[zoom_mask])])
+                zoom_values = zoom_values[np.isfinite(zoom_values)]
+                if zoom_values.size == 0:
+                    raise ValueError("No finite y values found in zoom_x_range.")
+                zoom_y1 = zoom_values.min()
+                zoom_y2 = zoom_values.max()
+                y_padding = zoom_padding * (zoom_y2 - zoom_y1)
+                if y_padding == 0:
+                    y_padding = zoom_padding * max(1.0, abs(zoom_y1))
+                zoom_y1 -= y_padding
+                zoom_y2 += y_padding
+            else:
+                zoom_y1, zoom_y2 = zoom_y_range
+
+            axins = ax.inset_axes(zoom_inset_position)
+            axins.plot(x, u_ref_t, linestyle='--', linewidth=2, color=ref_line.get_color())
+            axins.plot(x, u_nn_t, linewidth=2, color=nn_line.get_color())
+            axins.set_xlim(zoom_x1, zoom_x2)
+            axins.set_ylim(zoom_y1, zoom_y2)
+            if zoom_hide_ticks:
+                axins.set_xticklabels([])
+                axins.set_yticklabels([])
+            ax.indicate_inset_zoom(axins)
+
         ax.legend()
         ax.set_xlabel('x')
         ax.set_ylabel('u')
