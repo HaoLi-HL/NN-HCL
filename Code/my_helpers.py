@@ -328,13 +328,13 @@ def plot_numerical_solution(file_path='data/burgers_sin_ref.npz', ts=None):
     fig.colorbar(pcm, ax=ax1)
     ax1.set_xlabel('x')
     ax1.set_ylabel('t')
-    ax1.set_title('Numerical sol. $u$')
+    ax1.set_title('Numerical solution')
 
     # 1D plot at t = max(times)
     ax2.plot(x, u[-1, :])
     ax2.set_xlabel('x')
     ax2.set_ylabel('$u(t_{max}, x)$')
-    ax2.set_title(f'Numerical sol. at t = {times[-1]:.2f}')
+    ax2.set_title(f'Numerical solution at t = {times[-1]:.2f}')
 
     # Adjust layout and display the main plot
     plt.tight_layout()
@@ -349,7 +349,7 @@ def plot_numerical_solution(file_path='data/burgers_sin_ref.npz', ts=None):
         ax.plot(x, u[idx, :])
         ax.set_xlabel('x')
         ax.set_ylabel('$u(t, x)$')
-        ax.set_title(f'Numerical sol. at t = {t_val:.2f}')
+        ax.set_title(f'Numerical solution at t = {t_val:.2f}')
         plt.tight_layout()
         plt.show()
 
@@ -643,8 +643,8 @@ def plot_comparison_together(prob, u_ref=None, file_path='data/burgers_sin_ref.n
         u_nn_t = np.asarray(u_nn_values).squeeze()  # Shape: (n_x,)
 
         # Plot both on the same axes with same color
-        ax.plot(x, u_ref_t, linestyle='--', color=color, linewidth=2, marker=markers[i % len(markers)], markevery=30, label=f'Ref. sol. t={t_val:.2f}')
-        ax.plot(x, u_nn_t, linestyle='-', color=color, linewidth=2, label=f'NN sol. t={t_val:.2f}')
+        ax.plot(x, u_ref_t, linestyle='--', color=color, linewidth=1, marker=markers[i % len(markers)], markevery=30, label=f'Ref. t={t_val:.2f}')
+        ax.plot(x, u_nn_t, linestyle='-', color=color, linewidth=1, label=f'NN t={t_val:.2f}')
 
     # Set font sizes
     ax.tick_params(axis='both', which='major', labelsize=fontsize)
@@ -652,7 +652,7 @@ def plot_comparison_together(prob, u_ref=None, file_path='data/burgers_sin_ref.n
     ax.set_ylabel('u', fontsize=fontsize)
     if title is not None:
         ax.set_title(title, fontsize=fontsize)
-    ax.legend(loc='upper right', fontsize=12)
+    ax.legend(loc='upper right', fontsize=fontsize)
 
     plt.tight_layout()
     plt.savefig(save_path, format='eps', bbox_inches='tight')
@@ -714,8 +714,8 @@ def plot_comparison_seperate(model, u_ref=None, file_path='data/burgers_sin_ref.
 
         # Plot both on the same axes
         ax = axs[i]
-        ax.plot(x, u_ref_t, label='Ref. sol.', linestyle='--', linewidth=2)
-        ax.plot(x, u_nn_t, label='NN sol.', linewidth=2)
+        ax.plot(x, u_ref_t, label='Ref.', linestyle='--', linewidth=1)
+        ax.plot(x, u_nn_t, label='NN', linewidth=1)
         ax.legend()
         ax.set_xlabel('x')
         ax.set_ylabel('u')
@@ -740,6 +740,9 @@ def plot_comparison_seperate_combined_u_theta(
     zoom_inset_positions=None,
     M_x_zoom_in=2000,
     zoom_padding=0.1,
+    fontsize=16,
+    zoom_fontsize=None,
+    figsize=(8, 4),
 ):
     """
     Plot both the neural network solution and the reference solution for each timestamp in ts,
@@ -763,6 +766,11 @@ def plot_comparison_seperate_combined_u_theta(
             [[left, bottom, width, height], ...], relative to the main axes.
         M_x_zoom_in: Number of x grid points used for each zoomed inset.
         zoom_padding: Fractional y-padding used when a zoom_y_ranges entry is None.
+        fontsize: Font size for main axis labels, tick labels, title, and legend.
+        zoom_fontsize: Font size for inset axis labels and tick labels. If None,
+            uses 0.6 * fontsize with a minimum of 8.
+        figsize: Figure size for each timestamp plot. Use a smaller height for
+            a slimmer figure.
     """
     if ts is None:
         ts = []
@@ -776,6 +784,8 @@ def plot_comparison_seperate_combined_u_theta(
         raise ValueError("M_x_zoom_in must be a positive integer.")
     if zoom_padding < 0:
         raise ValueError("zoom_padding must be non-negative.")
+    if zoom_fontsize is None:
+        zoom_fontsize = max(8, 0.6 * fontsize)
     if zoom_in:
         if zoom_x_ranges is None:
             raise ValueError("zoom_x_ranges must be provided when zoom_in=True.")
@@ -831,7 +841,7 @@ def plot_comparison_seperate_combined_u_theta(
 
     for i, t_val in enumerate(ts):
         # Create a new figure for each timestamp
-        fig, ax = plt.subplots(1, 1, figsize=(10, 4))
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
 
         # Reference solution: find closest time index or use exact t_val
         idx = np.argmin(np.abs(times - t_val)) if u_ref is None else i
@@ -872,8 +882,8 @@ def plot_comparison_seperate_combined_u_theta(
             return np.asarray(u_ref(t_val, x_eval)).squeeze()
 
         # Plot both on the same axes
-        ref_line, = ax.plot(x, u_ref_t, label='Ref. sol.', linestyle='--', linewidth=2)
-        nn_line, = ax.plot(x, u_nn_t, label='NN sol.', linewidth=2)
+        ref_line, = ax.plot(x, u_ref_t, label='Ref.', linestyle='--', linewidth=1)
+        nn_line, = ax.plot(x, u_nn_t, label='NN', linewidth=1)
 
         if zoom_in:
             for zoom_x_range, zoom_y_range, zoom_inset_position in zip(
@@ -902,20 +912,21 @@ def plot_comparison_seperate_combined_u_theta(
                     zoom_y1, zoom_y2 = zoom_y_range
 
                 axins = ax.inset_axes(zoom_inset_position)
-                axins.plot(x_zoom, u_ref_zoom, linestyle='--', linewidth=2, color=ref_line.get_color())
-                axins.plot(x_zoom, u_nn_zoom, linewidth=2, color=nn_line.get_color())
+                axins.plot(x_zoom, u_ref_zoom, linestyle='--', linewidth=1, color=ref_line.get_color())
+                axins.plot(x_zoom, u_nn_zoom, linewidth=1, color=nn_line.get_color())
                 axins.set_xlim(zoom_x1, zoom_x2)
                 axins.set_ylim(zoom_y1, zoom_y2)
-                axins.set_xlabel('x', fontsize=8, labelpad=1)
-                axins.set_ylabel('u', fontsize=8, labelpad=1)
-                axins.tick_params(axis='both', which='major', labelsize=8)
+                axins.set_xlabel('x', fontsize=zoom_fontsize, labelpad=1)
+                axins.set_ylabel('u', fontsize=zoom_fontsize, labelpad=1)
+                axins.tick_params(axis='both', which='major', labelsize=zoom_fontsize)
                 ax.indicate_inset_zoom(axins)
 
-        ax.legend()
-        ax.set_xlabel('x')
-        ax.set_ylabel('u')
+        ax.legend(fontsize=fontsize)
+        ax.set_xlabel('x', fontsize=fontsize)
+        ax.set_ylabel('u', fontsize=fontsize)
+        ax.tick_params(axis='both', which='major', labelsize=fontsize)
         ax.set_xlim(x_min, x_max)
-        ax.set_title(f'Solutions at t = {t_val:.2f}')
+        ax.set_title(f'Solutions at t = {t_val:.2f}', fontsize=fontsize)
 
         plt.tight_layout()
         if save_eps:
