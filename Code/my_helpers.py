@@ -735,11 +735,11 @@ def plot_comparison_seperate_combined_u_theta(
     save_eps=False,
     tol=1e-6,
     zoom_in=False,
-    zoom_x_range=None,
-    zoom_y_range=None,
-    zoom_inset_position=(0.55, 0.12, 0.40, 0.40),
+    zoom_x_ranges=None,
+    zoom_y_ranges=None,
+    zoom_inset_positions=None,
+    M_x_zoom_in=2000,
     zoom_padding=0.1,
-    zoom_hide_ticks=True,
 ):
     """
     Plot both the neural network solution and the reference solution for each timestamp in ts,
@@ -755,13 +755,14 @@ def plot_comparison_seperate_combined_u_theta(
         M_x: Number of x grid points (default: 601).
         save_eps: Whether to save each figure as .eps file (default: False).
         zoom_in: Whether to add a zoomed inset plot (default: False).
-        zoom_x_range: Tuple (x1, x2) specifying the x range to zoom in.
-        zoom_y_range: Optional tuple (y1, y2) specifying the y range in the inset.
-            If None, this range is computed from both plotted curves in zoom_x_range.
-        zoom_inset_position: Inset axes position [left, bottom, width, height],
-            relative to the main axes (default: (0.55, 0.12, 0.40, 0.40)).
-        zoom_padding: Fractional y-padding used when zoom_y_range is None.
-        zoom_hide_ticks: Whether to hide tick labels in the inset (default: True).
+        zoom_x_ranges: List of tuples [(x1, x2), ...] specifying x ranges to zoom in.
+        zoom_y_ranges: Optional list of tuples [(y1, y2), ...] specifying y ranges
+            for each inset. Use None for an entry to compute that inset's y range
+            from both plotted curves.
+        zoom_inset_positions: Optional list of inset positions
+            [[left, bottom, width, height], ...], relative to the main axes.
+        M_x_zoom_in: Number of x grid points used for each zoomed inset.
+        zoom_padding: Fractional y-padding used when a zoom_y_ranges entry is None.
     """
     if ts is None:
         ts = []
@@ -771,10 +772,46 @@ def plot_comparison_seperate_combined_u_theta(
 
     if M_x <= 0:
         raise ValueError("M_x must be a positive integer.")
-    if zoom_in and zoom_x_range is None:
-        raise ValueError("zoom_x_range must be provided when zoom_in=True.")
+    if M_x_zoom_in <= 0:
+        raise ValueError("M_x_zoom_in must be a positive integer.")
     if zoom_padding < 0:
         raise ValueError("zoom_padding must be non-negative.")
+    if zoom_in:
+        if zoom_x_ranges is None:
+            raise ValueError("zoom_x_ranges must be provided when zoom_in=True.")
+        if len(zoom_x_ranges) == 2 and np.isscalar(zoom_x_ranges[0]) and np.isscalar(zoom_x_ranges[1]):
+            zoom_x_ranges = [zoom_x_ranges]
+        else:
+            zoom_x_ranges = list(zoom_x_ranges)
+        if len(zoom_x_ranges) == 0:
+            raise ValueError("zoom_x_ranges must contain at least one interval when zoom_in=True.")
+
+        if zoom_y_ranges is None:
+            zoom_y_ranges = [None] * len(zoom_x_ranges)
+        elif len(zoom_y_ranges) == 2 and np.isscalar(zoom_y_ranges[0]) and np.isscalar(zoom_y_ranges[1]) and len(zoom_x_ranges) == 1:
+            zoom_y_ranges = [zoom_y_ranges]
+        else:
+            zoom_y_ranges = list(zoom_y_ranges)
+        if len(zoom_y_ranges) != len(zoom_x_ranges):
+            raise ValueError("zoom_y_ranges must have the same length as zoom_x_ranges.")
+
+        if zoom_inset_positions is None:
+            default_positions = [
+                (0.55, 0.12, 0.40, 0.40),
+                (0.08, 0.52, 0.40, 0.40),
+                (0.55, 0.52, 0.40, 0.40),
+                (0.08, 0.12, 0.40, 0.40),
+            ]
+            zoom_inset_positions = [
+                default_positions[k % len(default_positions)]
+                for k in range(len(zoom_x_ranges))
+            ]
+        elif len(zoom_inset_positions) == 4 and all(np.isscalar(v) for v in zoom_inset_positions) and len(zoom_x_ranges) == 1:
+            zoom_inset_positions = [zoom_inset_positions]
+        else:
+            zoom_inset_positions = list(zoom_inset_positions)
+        if len(zoom_inset_positions) != len(zoom_x_ranges):
+            raise ValueError("zoom_inset_positions must have the same length as zoom_x_ranges.")
 
     x = np.linspace(x_min, x_max, M_x)
 
@@ -823,42 +860,56 @@ def plot_comparison_seperate_combined_u_theta(
         u_nn_values = segment.model.forward(tx_points)
         u_nn_t = np.asarray(u_nn_values).squeeze()  # Shape: (n_x,)
 
+        def eval_nn_on_x(x_eval):
+            x_eval_jnp = jnp.asarray(x_eval)
+            t_eval_jnp = jnp.full_like(x_eval_jnp, t_val)
+            tx_eval = jnp.stack([t_eval_jnp, x_eval_jnp], axis=1)
+            return np.asarray(segment.model.forward(tx_eval)).squeeze()
+
+        def eval_ref_on_x(x_eval):
+            if u_ref is None:
+                return np.interp(x_eval, x_data, u_data[idx])
+            return np.asarray(u_ref(t_val, x_eval)).squeeze()
+
         # Plot both on the same axes
         ref_line, = ax.plot(x, u_ref_t, label='Ref. sol.', linestyle='--', linewidth=2)
         nn_line, = ax.plot(x, u_nn_t, label='NN sol.', linewidth=2)
 
         if zoom_in:
-            zoom_x1, zoom_x2 = zoom_x_range
-            zoom_x_low = min(zoom_x1, zoom_x2)
-            zoom_x_high = max(zoom_x1, zoom_x2)
-            zoom_mask = (x >= zoom_x_low) & (x <= zoom_x_high)
-            if not np.any(zoom_mask):
-                raise ValueError("zoom_x_range does not contain any plotted x points. Increase M_x or adjust zoom_x_range.")
+            for zoom_x_range, zoom_y_range, zoom_inset_position in zip(
+                zoom_x_ranges,
+                zoom_y_ranges,
+                zoom_inset_positions,
+            ):
+                zoom_x1, zoom_x2 = zoom_x_range
+                x_zoom = np.linspace(zoom_x1, zoom_x2, M_x_zoom_in)
+                u_ref_zoom = eval_ref_on_x(x_zoom)
+                u_nn_zoom = eval_nn_on_x(x_zoom)
 
-            if zoom_y_range is None:
-                zoom_values = np.concatenate([np.ravel(u_ref_t[zoom_mask]), np.ravel(u_nn_t[zoom_mask])])
-                zoom_values = zoom_values[np.isfinite(zoom_values)]
-                if zoom_values.size == 0:
-                    raise ValueError("No finite y values found in zoom_x_range.")
-                zoom_y1 = zoom_values.min()
-                zoom_y2 = zoom_values.max()
-                y_padding = zoom_padding * (zoom_y2 - zoom_y1)
-                if y_padding == 0:
-                    y_padding = zoom_padding * max(1.0, abs(zoom_y1))
-                zoom_y1 -= y_padding
-                zoom_y2 += y_padding
-            else:
-                zoom_y1, zoom_y2 = zoom_y_range
+                if zoom_y_range is None:
+                    zoom_values = np.concatenate([np.ravel(u_ref_zoom), np.ravel(u_nn_zoom)])
+                    zoom_values = zoom_values[np.isfinite(zoom_values)]
+                    if zoom_values.size == 0:
+                        raise ValueError("No finite y values found in zoom_x_ranges.")
+                    zoom_y1 = zoom_values.min()
+                    zoom_y2 = zoom_values.max()
+                    y_padding = zoom_padding * (zoom_y2 - zoom_y1)
+                    if y_padding == 0:
+                        y_padding = zoom_padding * max(1.0, abs(zoom_y1))
+                    zoom_y1 -= y_padding
+                    zoom_y2 += y_padding
+                else:
+                    zoom_y1, zoom_y2 = zoom_y_range
 
-            axins = ax.inset_axes(zoom_inset_position)
-            axins.plot(x, u_ref_t, linestyle='--', linewidth=2, color=ref_line.get_color())
-            axins.plot(x, u_nn_t, linewidth=2, color=nn_line.get_color())
-            axins.set_xlim(zoom_x1, zoom_x2)
-            axins.set_ylim(zoom_y1, zoom_y2)
-            if zoom_hide_ticks:
-                axins.set_xticklabels([])
-                axins.set_yticklabels([])
-            ax.indicate_inset_zoom(axins)
+                axins = ax.inset_axes(zoom_inset_position)
+                axins.plot(x_zoom, u_ref_zoom, linestyle='--', linewidth=2, color=ref_line.get_color())
+                axins.plot(x_zoom, u_nn_zoom, linewidth=2, color=nn_line.get_color())
+                axins.set_xlim(zoom_x1, zoom_x2)
+                axins.set_ylim(zoom_y1, zoom_y2)
+                axins.set_xlabel('x', fontsize=8, labelpad=1)
+                axins.set_ylabel('u', fontsize=8, labelpad=1)
+                axins.tick_params(axis='both', which='major', labelsize=8)
+                ax.indicate_inset_zoom(axins)
 
         ax.legend()
         ax.set_xlabel('x')
